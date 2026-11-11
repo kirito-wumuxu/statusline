@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StatusLine 实时监控看板</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- 顶部导航栏 -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">❖</span>
+        <h1 class="brand-title">StatusLine <span>遥测监控</span></h1>
+        <span class="live-dot" title="实时连接中"></span>
+      </div>
+      <div class="header-meta">
+        <div id="header-account" class="header-account-tag" style="display: none;">
+          <span class="user-icon">👤</span>
+          <span id="header-account-email" class="email"></span>
+          <span id="header-account-tier" class="tier-pill"></span>
+        </div>
+        <div class="header-status">
+          <span id="auto-refresh-tag" class="refresh-tag">自动刷新: 60s</span>
+          <button id="btn-manual-refresh" class="btn-refresh" title="立即向所有活跃终端发送刷新信号">立即刷新</button>
+          <span class="separator">·</span>
+          <span id="connection-status" class="status-text">已连接</span>
+          <span class="separator">·</span>
+          <span id="last-updated" class="time-text">--:--:--</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 核心指标概览 -->
+    <section class="overview-grid">
+      <div class="stat-card">
+        <div class="stat-label">活跃会话</div>
+        <div class="stat-number" id="val-sessions">0</div>
+        <div class="stat-sub" id="val-sources">0 agy · 0 claude</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">累计消耗 Token</div>
+        <div class="stat-number" id="val-tokens">0</div>
+        <div class="stat-sub" id="val-tokens-detail">输入 ↑0 · 输出 ↓0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">当前账号 & 计划</div>
+        <div class="stat-number stat-account" id="val-account-email">未绑定</div>
+        <div class="stat-sub" id="val-account-tier">暂无订阅信息</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">使用中模型</div>
+        <div class="stat-number stat-model" id="val-active-model">-</div>
+        <div class="stat-sub" id="val-model-count">0 种运行模型</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">实时消耗速率</div>
+        <div class="stat-number stat-rate" id="val-token-rate">0 / min</div>
+        <div class="stat-sub" id="val-token-rate-sub">近 5 分钟吞吐量</div>
+      </div>
+    </section>
+
+    <!-- Token 消耗趋势折线图 -->
+    <section class="dashboard-section chart-section">
+      <div class="section-title-bar">
+        <h2>Token 消耗历史趋势</h2>
+        <span class="section-hint" id="chart-subtext">实时时间序列变化曲线</span>
+      </div>
+      <div class="chart-card">
+        <div class="chart-svg-container" id="chart-container">
+          <svg id="trend-svg" viewBox="0 0 800 160" preserveAspectRatio="none">
+            <!-- 动态渲染 -->
+          </svg>
+        </div>
+        <div class="chart-axis-labels">
+          <span id="chart-start-time">--:--</span>
+          <span id="chart-mid-tokens">累计 Token 曲线</span>
+          <span id="chart-end-time">现在</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 模型配额监控区 -->
+    <section class="dashboard-section">
+      <div class="section-title-bar">
+        <h2>模型配额余量</h2>
+        <span class="section-hint">实时额度百分比及周期重置倒计时</span>
+      </div>
+      <div class="quota-grid">
+        <!-- Gemini 配额卡片 -->
+        <div class="quota-panel gemini-panel">
+          <div class="panel-header">
+            <span class="provider-pill gemini-pill">Gemini</span>
+            <span class="provider-desc">Google AI 服务配额</span>
+          </div>
+          <div class="quota-row">
+            <div class="quota-meta">
+              <span class="window-name">短期窗口 (5小时)</span>
+              <span id="gemini-short-label" class="window-pct">100%</span>
+            </div>
+            <div class="meter-bar">
+              <div id="gemini-short-bar" class="meter-fill fill-green" style="width: 100%;"></div>
+            </div>
+            <div class="reset-tip" id="gemini-short-time">重置倒计时: --</div>
+          </div>
+          <div class="quota-row">
+            <div class="quota-meta">
+              <span class="window-name">长期窗口 (周度)</span>
+              <span id="gemini-long-label" class="window-pct">100%</span>
+            </div>
+            <div class="meter-bar">
+              <div id="gemini-long-bar" class="meter-fill fill-green" style="width: 100%;"></div>
+            </div>
+            <div class="reset-tip" id="gemini-long-time">重置倒计时: --</div>
+          </div>
+        </div>
+
+        <!-- Claude 配额卡片 -->
+        <div class="quota-panel claude-panel">
+          <div class="panel-header">
+            <span class="provider-pill claude-pill">Claude</span>
+            <span class="provider-desc">Anthropic 模型配额 (3p)</span>
+          </div>
+          <div class="quota-row">
+            <div class="quota-meta">
+              <span class="window-name">短期窗口 (5小时)</span>
+              <span id="claude-short-label" class="window-pct">100%</span>
+            </div>
+            <div class="meter-bar">
+              <div id="claude-short-bar" class="meter-fill fill-green" style="width: 100%;"></div>
+            </div>
+            <div class="reset-tip" id="claude-short-time">重置倒计时: --</div>
+          </div>
+          <div class="quota-row">
+            <div class="quota-meta">
+              <span class="window-name">长期窗口 (周度)</span>
+              <span id="claude-long-label" class="window-pct">100%</span>
+            </div>
+            <div class="meter-bar">
+              <div id="claude-long-bar" class="meter-fill fill-green" style="width: 100%;"></div>
+            </div>
+            <div class="reset-tip" id="claude-long-time">重置倒计时: --</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 实时终端会话 -->
+    <section class="dashboard-section">
+      <div class="section-title-bar">
+        <h2>活跃终端会话</h2>
+        <span class="section-hint" id="session-count-tip">检测到 0 个活跃会话</span>
+      </div>
+      <div id="sessions-container" class="session-cards-list">
+        <div class="empty-placeholder">暂未接收到任何会话遥测数据，请在终端中启动 agy 会话...</div>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

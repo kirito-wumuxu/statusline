@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -320,4 +321,56 @@ func ExtractQuotasSummary(quotas map[string]QuotaBucket) (gemini, claude []Quota
 	sort.Slice(gemini, func(i, j int) bool { return gemini[i].ResetSeconds < gemini[j].ResetSeconds })
 	sort.Slice(claude, func(i, j int) bool { return claude[i].ResetSeconds < claude[j].ResetSeconds })
 	return gemini, claude
+}
+
+
+type ModelSummary struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Effort      string `json:"effort,omitempty"`
+}
+
+type AccountSummary struct {
+	Email    string `json:"email,omitempty"`
+	PlanTier string `json:"plan_tier,omitempty"`
+}
+
+type TokensSummary struct {
+	TotalInputTokens  int64 `json:"total_input_tokens"`
+	TotalOutputTokens int64 `json:"total_output_tokens"`
+	TotalTokens       int64 `json:"total_tokens"`
+}
+
+type ContextSummary struct {
+	ContextWindowSize int64   `json:"context_window_size"`
+	UsedPercentage    float64 `json:"used_percentage"`
+}
+
+type QuotaSummary struct {
+	Gemini ProviderQuota `json:"gemini"`
+	Claude ProviderQuota `json:"claude"`
+}
+
+type ProviderQuota struct {
+	ShortPercentage int    `json:"short_percentage"`
+	ShortReset      string `json:"short_reset"`
+	LongPercentage  int    `json:"long_percentage"`
+	LongReset       string `json:"long_reset"`
+}
+
+func FormatDurationCompact(seconds int64) string {
+	if seconds <= 0 {
+		return "0m"
+	}
+	days := seconds / 86400
+	remSeconds := seconds % 86400
+	hours := remSeconds / 3600
+	remMinutes := (remSeconds % 3600) / 60
+	if days > 0 {
+		return fmt.Sprintf("%dd%dh", days, hours)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh%dm", hours, remMinutes)
+	}
+	return fmt.Sprintf("%dm", remMinutes)
 }
