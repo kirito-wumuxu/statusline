@@ -70,6 +70,11 @@ type QuotaItem struct {
 }
 
 func ParseAndNormalize(raw []byte, n node.NodeInfo) (*TelemetryEnvelope, *StatusLineData, error) {
+	// Clean invalid UTF-8 bytes upfront to ensure json.Unmarshal never fails on corrupted bytes
+	if len(raw) > 0 {
+		raw = []byte(CleanUTF8(string(raw)))
+	}
+
 	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
 	envelope := &TelemetryEnvelope{
 		NodeID:        n.NodeID,
