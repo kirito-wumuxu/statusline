@@ -6,9 +6,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"statusline/internal/config"
 	"statusline/internal/node"
+	"statusline/internal/vcs"
 )
 
 func TestExecuteStatuslineEmpty(t *testing.T) {
@@ -80,8 +82,8 @@ func TestExecuteGitStatusIntegration(t *testing.T) {
 	execute(bytes.NewBufferString(rawJSON), &out, cfg, n)
 
 	result := out.String()
-	// Current repository is on feat/statusline-sqlite, which should be detected
-	if !strings.Contains(result, "feat/statusline-sqlite") {
-		t.Errorf("expected branch feat/statusline-sqlite in statusline output, got %s", result)
+	branch, _, _, _ := vcs.GetGitStatus(".", 500*time.Millisecond)
+	if branch != "" && !strings.Contains(result, "("+branch) {
+		t.Errorf("expected branch (%s) in statusline output, got %s", branch, result)
 	}
 }
