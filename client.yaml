@@ -1,0 +1,39 @@
+# statusline 客户端配置 (client.yaml)
+# 默认加载路径优先级:
+#   1. 环境变量 STATUSLINE_CLIENT_CONFIG / STATUSLINE_CONFIG
+#   2. 当前工作目录 ./client.yaml
+#   3. 用户全局目录 ~/.config/statusline/client.yaml
+#   4. 兼容兜底 ./config.yaml
+
+# 遥测数据上报
+report:
+  endpoint: "http://127.0.0.1:8765/api/v1/report" # 设为 "off" 可停用上报，纯本地离线渲染
+  timeout_ms: 100                                  # 客户端严格上报超时，绝不阻塞终端
+  api_key: ""                                      # 可选的上报认证密钥
+
+# 节点指纹与环境元数据
+node:
+  id: ""           # 留空则自动提取硬件指纹并 SHA256 脱敏 (如 node_8f9d2a1b4c3e5f6a)
+  custom_tags:
+    env: "local"
+
+# 终端状态栏渲染设置
+display:
+  enable_stdout: true
+  # 状态栏模块化显示列表：可自由调换顺序，不需要的模块直接注释即可
+  # 支持模块：
+  #   - dir: 工作区目录，家目录折叠为 [~]
+  #   - vcs: Git 分支与修改标记 (main*)
+  #   - account: 当前登录账号 <user@email.com>（无账号时自动跳过）
+  #   - model: 模型名称与推理深度 [Gemini 3.8 Flash (High)]
+  #   - context: 上下文 8 段斜杠进度条与使用百分比 \\\\\\\\ 22% [1M]
+  #   - tokens: 会话输入/输出 Token 计数器 ↑1.5k ↓230
+  #   - quota: 供应商配额余量与冷却重置倒计时
+  segments:
+    - dir
+    - vcs
+    - account
+    - model
+    - context
+    - tokens
+    - quota

@@ -18,16 +18,16 @@ import (
 	"statusline/internal/storage"
 )
 
-func executeMock(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
+func executeMock(r io.Reader, w io.Writer, cfg *config.ClientConfig, n node.NodeInfo) {
 	raw, _ := io.ReadAll(r)
 	env, data, _ := model.ParseAndNormalize(raw, n)
 	homeDir, _ := os.UserHomeDir()
 	line := render.AssembleLine(data, homeDir)
 	_, _ = io.WriteString(w, line)
 
-	if cfg != nil && cfg.Server.Endpoint != "" {
-		timeout := time.Duration(cfg.Server.TimeoutMS) * time.Millisecond
-		reporter.ReportAsync(env, cfg.Server.Endpoint, timeout)
+	if cfg != nil && cfg.Report.Endpoint != "" {
+		timeout := time.Duration(cfg.Report.TimeoutMS) * time.Millisecond
+		reporter.ReportAsync(env, cfg.Report.Endpoint, timeout)
 	}
 }
 
@@ -41,14 +41,15 @@ func TestEndToEndPipeline(t *testing.T) {
 	}
 	defer store.Close()
 
-	cfg := config.DefaultConfig()
-	srv := server.NewServer(cfg, store, nil)
+	serverCfg := config.DefaultServerConfig()
+	srv := server.NewServer(serverCfg, store, nil)
 	ts := httptest.NewServer(srv.Router())
 	defer ts.Close()
 
 	// Update client config to report to test server
-	cfg.Server.Endpoint = ts.URL + "/api/v1/report"
-	cfg.Server.TimeoutMS = 1000 // Give test ample timeout
+	clientCfg := config.DefaultClientConfig()
+	clientCfg.Report.Endpoint = ts.URL + "/api/v1/report"
+	clientCfg.Report.TimeoutMS = 1000 // Give test ample timeout
 	n := node.GetNodeInfo("node_e2e_01", "1.0.0")
 
 	// Sample 1: Antigravity Payload
@@ -109,7 +110,7 @@ func TestEndToEndPipeline(t *testing.T) {
 
 	// 1. Execute AGY statusline
 	var outAGY bytes.Buffer
-	executeMock(bytes.NewBufferString(agyJSON), &outAGY, cfg, n)
+	executeMock(bytes.NewBufferString(agyJSON), &outAGY, clientCfg, n)
 
 	plainAGY := render.StripANSI(outAGY.String())
 	if !bytes.Contains([]byte(plainAGY), []byte("Gemini 3.8 Flash (High)")) {
@@ -118,7 +119,7 @@ func TestEndToEndPipeline(t *testing.T) {
 
 	// 2. Execute Claude Code statusline
 	var outClaude bytes.Buffer
-	executeMock(bytes.NewBufferString(claudeJSON), &outClaude, cfg, n)
+	executeMock(bytes.NewBufferString(claudeJSON), &outClaude, clientCfg, n)
 
 	plainClaude := render.StripANSI(outClaude.String())
 	t.Logf("plainClaude: %s", plainClaude)

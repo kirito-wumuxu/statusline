@@ -34,7 +34,9 @@
 
 ```text
 .
-├── config.yaml                     # 统一配置文件模板
+├── client.yaml                     # 客户端配置文件模板 (上报、节点指纹、模块化显示)
+├── server.yaml                     # 服务端配置文件模板 (端口、SQLite WAL 存储路径)
+├── config.yaml                     # 统一配置文件模板 (兼容旧版合并配置)
 ├── go.mod                          # Go 模块定义 (Go 1.22+, modernc.org/sqlite)
 ├── cmd/
 │   ├── statusline/                 # 客户端入口 (stdin -> render -> async report)

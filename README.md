@@ -138,13 +138,27 @@ statusline init
   export STATUSLINE_SERVER_URL="off"
   ```
 
-### 5. 模块化状态栏与自定义排序 (`config.yaml`)
+### 5. 客户端配置与模块化排序 (`client.yaml`)
 
-可在 `config.yaml` 中通过 `display.segments` 列表自由调换模块前后顺序，或注释/移除不需要的模块：
+客户端配置推荐存放于当前工作目录 `./client.yaml` 或用户目录 `~/.config/statusline/client.yaml`（向下兼容 `./config.yaml`）：
 
 ```yaml
+# 遥测数据上报
+report:
+  endpoint: "http://127.0.0.1:8765/api/v1/report" # 设为 "off" 可停用上报，纯本地离线渲染
+  timeout_ms: 100                                  # 客户端严格上报超时，绝不阻塞终端
+  api_key: ""                                      # 可选的上报认证密钥
+
+# 节点指纹与元数据
+node:
+  id: ""           # 留空自动提取硬件指纹 SHA256 (node_...)
+  custom_tags:
+    env: "local"
+
+# 终端状态栏渲染设置
 display:
   enable_stdout: true
+  # 状态栏模块化显示列表：可自由调换顺序，不需要的模块直接注释即可
   segments:
     - dir         # 工作区目录 [~] 或 [/path]
     - vcs         # Git 分支与修改标记 (main*)
@@ -166,12 +180,29 @@ export STATUSLINE_SEGMENTS="account,model,context,tokens,quota"
 
 服务端负责接收多节点客户端上报、写入 SQLite3 数据库并提供实时 Web 监控大盘。
 
+### 服务端配置 (`server.yaml`)
+服务端配置推荐存放于 `./server.yaml` 或 `~/.config/statusline/server.yaml`（向下兼容 `./config.yaml`）：
+
+```yaml
+# HTTP 监控服务监听与认证
+server:
+  host: "0.0.0.0"                                  # 监听网卡地址
+  port: 8765                                       # 监听端口
+  api_key: ""                                      # 可选的服务端接入认证密钥
+
+# 持久化存储引擎 (纯 Go 零 CGO 嵌入式 SQLite3 WAL 模式)
+storage:
+  db_path: "~/.local/share/statusline/statusline.db" # SQLite 数据库持久化路径
+  wal_mode: true                                   # 启用 WAL 高并发写入模式
+```
+
+### 启动命令
 ```bash
-# 使用默认配置启动 (监听 0.0.0.0:8765，数据库保存在 ~/.local/share/statusline/statusline.db)
+# 使用默认配置启动 (优先读取 ./server.yaml 或 ~/.config/statusline/server.yaml)
 statusline-server
 
-# 指定端口与数据库路径
-statusline-server -port 8765 -db /path/to/statusline.db -config config.yaml
+# 指定配置文件、端口或数据库路径
+statusline-server -config server.yaml -port 8765 -db ~/.local/share/statusline/statusline.db
 ```
 
 ### Web 实时监控仪表盘

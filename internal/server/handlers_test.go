@@ -21,7 +21,7 @@ func setupTestServer(t *testing.T) (*Server, *storage.Store) {
 		t.Fatalf("failed to init store: %v", err)
 	}
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultServerConfig()
 	srv := NewServer(cfg, store, nil)
 	return srv, store
 }

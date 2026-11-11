@@ -9,13 +9,13 @@ import (
 )
 
 type Server struct {
-	cfg    *config.Config
+	cfg    *config.ServerConfig
 	store  *storage.Store
 	router *http.ServeMux
 	webFS  fs.FS
 }
 
-func NewServer(cfg *config.Config, store *storage.Store, webFS fs.FS) *Server {
+func NewServer(cfg *config.ServerConfig, store *storage.Store, webFS fs.FS) *Server {
 	s := &Server{
 		cfg:    cfg,
 		store:  store,

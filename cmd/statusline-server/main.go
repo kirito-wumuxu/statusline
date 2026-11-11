@@ -33,31 +33,35 @@ func init() {
 func main() {
 	portFlag := flag.Int("port", 0, "HTTP server listening port")
 	dbFlag := flag.String("db", "", "Path to SQLite database file")
-	configFlag := flag.String("config", "", "Path to config.yaml")
+	configFlag := flag.String("config", "", "Path to server.yaml (or config.yaml)")
 	flag.Parse()
 
-	cfg, err := config.LoadConfig(*configFlag)
+	cfg, err := config.LoadServerConfig(*configFlag)
 	if err != nil {
-		log.Printf("Warning: failed to load config file: %v, using defaults", err)
-		cfg = config.DefaultConfig()
+		log.Printf("Warning: failed to load server config: %v, using defaults", err)
+		cfg = config.DefaultServerConfig()
 	}
 
 	if *portFlag > 0 {
 		cfg.Server.Port = *portFlag
 	}
 	if *dbFlag != "" {
+		cfg.Storage.DBPath = *dbFlag
 		cfg.Server.DBPath = *dbFlag
 	}
 
-	store, err := storage.NewStore(cfg.Server.DBPath)
+	store, err := storage.NewStore(cfg.Storage.DBPath)
 	if err != nil {
-		log.Fatalf("Fatal: failed to initialize SQLite database at %s: %v", cfg.Server.DBPath, err)
+		log.Fatalf("Fatal: failed to initialize SQLite database at %s: %v", cfg.Storage.DBPath, err)
 	}
 	defer store.Close()
 
 	srv := server.NewServer(cfg, store, webFS)
 
-	addr := fmt.Sprintf(":%d", cfg.Server.Port)
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	if cfg.Server.Host == "0.0.0.0" || cfg.Server.Host == "" {
+		addr = fmt.Sprintf(":%d", cfg.Server.Port)
+	}
 	httpServer := &http.Server{
 		Addr:         addr,
 		Handler:      srv.Router(),
@@ -69,7 +73,7 @@ func main() {
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("StatusLine Server listening on http://127.0.0.1:%d (DB: %s)", cfg.Server.Port, cfg.Server.DBPath)
+		log.Printf("StatusLine Server listening on http://127.0.0.1:%d (DB: %s)", cfg.Server.Port, cfg.Storage.DBPath)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server error: %v", err)
 		}

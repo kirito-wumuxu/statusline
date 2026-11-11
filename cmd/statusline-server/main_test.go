@@ -20,7 +20,7 @@ func TestServerWebAssets(t *testing.T) {
 	}
 	defer store.Close()
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultServerConfig()
 	srv := server.NewServer(cfg, store, webFS)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -42,7 +42,7 @@ func TestManualRefreshWithWebFS(t *testing.T) {
 	}
 	defer store.Close()
 
-	cfg := config.DefaultConfig()
+	cfg := config.DefaultServerConfig()
 	srv := server.NewServer(cfg, store, webFS)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/refresh", nil)
