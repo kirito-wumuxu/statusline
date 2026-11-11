@@ -91,6 +91,12 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusl
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline-server.exe ./cmd/statusline-server
 ```
 
+### 构建全平台发布包 (Release Assets)
+```bash
+./scripts/build-release.sh v0.1.0
+```
+推送版本 Tag（如 `git tag v0.1.0 && git push origin v0.1.0`）将自动触发 GitHub Actions 构建并发布 Release。
+
 ### 运行测试
 ```bash
 go test ./... -v
