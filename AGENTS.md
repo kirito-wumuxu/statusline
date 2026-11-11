@@ -119,11 +119,15 @@ go test ./... -v
 浏览器访问 `http://127.0.0.1:8765` 即可打开实时深色 Web 监控仪表盘。
 
 ### 客户端接入配置
-- **Antigravity CLI (`agy`)**: 在 `~/.gemini/settings.json` 或对应配置中将 statusline 命令指向可执行文件路径：
-  ```json
-  "statusline_command": "~/.local/bin/statusline"
+- **一键配置 Antigravity CLI**:
+  ```bash
+  statusline init
   ```
-- **Claude Code**: 在终端或配置文件中设置自定义 statusline 钩子。
+  自动检测并将二进制安装至 `~/.local/bin/statusline`，写入 `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`）中的 `statusLine.command` 与 `statusLine.enabled: true`。
+- **Claude Code**: 在终端或配置文件中设置自定义 statusline 钩子：
+  ```bash
+  export CLAUDE_STATUSLINE_COMMAND="statusline"
+  ```
 - **自定义环境变量**:
   - `export STATUSLINE_SERVER_URL="http://127.0.0.1:8765/api/v1/report"`（修改上报地址）
   - `export STATUSLINE_SERVER_URL="off"`（停用遥测上报，纯本地离线渲染）

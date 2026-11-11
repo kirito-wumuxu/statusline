@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"statusline/internal/config"
+	"statusline/internal/installer"
 	"statusline/internal/node"
 	"statusline/internal/render"
 	"statusline/internal/vcs"
@@ -110,5 +113,26 @@ func TestExecuteAccountAndSegments(t *testing.T) {
 	}
 	if strings.Contains(plain, "[/tmp]") {
 		t.Errorf("expected dir omitted due to custom segments, got %q", plain)
+	}
+}
+
+func TestInitCommandIntegration(t *testing.T) {
+	tmpDir := t.TempDir()
+	settingsPath := filepath.Join(tmpDir, "settings.json")
+	binPath := "/usr/local/bin/statusline"
+
+	var out bytes.Buffer
+	err := installer.RunInit([]string{"-settings", settingsPath, "-bin", binPath, "-no-copy"}, &out)
+	if err != nil {
+		t.Fatalf("RunInit failed: %v", err)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("failed to read settings: %v", err)
+	}
+
+	if !strings.Contains(string(data), binPath) {
+		t.Errorf("expected binPath in settings JSON, got %s", string(data))
 	}
 }

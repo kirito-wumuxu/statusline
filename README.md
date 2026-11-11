@@ -82,17 +82,38 @@ mv statusline statusline-server ~/.local/bin/
 
 ## 🔧 配置与接入
 
-### 1. 接入 Google Antigravity CLI (`agy`)
+### 1. 一键自动配置 Antigravity CLI (`statusline init`)
 
-在 Antigravity 配置文件（如 `~/.gemini/settings.json` 或项目级 `.antigravity/settings.json`）中，指定状态栏可执行文件路径：
+推荐使用一键初始化命令自动完成配置：
+
+```bash
+statusline init
+```
+
+该命令将自动：
+1. 自动将 `statusline` 二进制复制安装至 `~/.local/bin/statusline`；
+2. 自动定位并安全配置 `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`），写入 `"statusLine.command"` 与 `"statusLine.enabled: true"`，同时保留文件中原有的其他所有配置项；
+3. 重启 Antigravity CLI 即可立刻体验实时状态栏！
+
+> **高级参数**：
+> - `statusline init -settings /path/to/settings.json`：指定自定义配置文件路径；
+> - `statusline init -bin /custom/bin/statusline`：指定自定义二进制路径；
+> - `statusline init -no-copy`：仅修改配置文件，跳过二进制复制。
+
+### 2. 手动接入 Antigravity CLI (`agy`)
+
+若需要手动配置，可直接编辑 `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`）：
 
 ```json
 {
-  "statusline_command": "~/.local/bin/statusline"
+  "statusLine": {
+    "command": "~/.local/bin/statusline",
+    "enabled": true
+  }
 }
 ```
 
-### 2. 接入 Anthropic Claude Code
+### 3. 接入 Anthropic Claude Code
 
 配置 Claude Code 的状态栏输出钩子，将管道指向 `statusline`：
 
@@ -100,7 +121,7 @@ mv statusline statusline-server ~/.local/bin/
 export CLAUDE_STATUSLINE_COMMAND="statusline"
 ```
 
-### 3. 环境变量与无服务器模式 (Pure Local)
+### 4. 环境变量与无服务器模式 (Pure Local)
 
 - **自定义服务端上报地址**：
   ```bash
@@ -111,7 +132,7 @@ export CLAUDE_STATUSLINE_COMMAND="statusline"
   export STATUSLINE_SERVER_URL="off"
   ```
 
-### 4. 模块化状态栏与自定义排序 (`config.yaml`)
+### 5. 模块化状态栏与自定义排序 (`config.yaml`)
 
 可在 `config.yaml` 中通过 `display.segments` 列表自由调换模块前后顺序，或注释/移除不需要的模块：
 

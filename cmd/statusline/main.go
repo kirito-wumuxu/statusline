@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"time"
 
 	"statusline/internal/config"
+	"statusline/internal/installer"
 	"statusline/internal/model"
 	"statusline/internal/node"
 	"statusline/internal/render"
@@ -14,6 +16,22 @@ import (
 )
 
 var Version = "1.0.0"
+
+func printHelp() {
+	fmt.Printf(`statusline v%s - Terminal statusline plugin for Antigravity & Claude Code
+
+Usage:
+  statusline                    Render statusline from stdin JSON (called by AI CLI)
+  statusline init [options]     Automatically configure Antigravity settings.json
+  statusline --version, -v      Print version information
+  statusline --help, -h         Show this help message
+
+Init Options:
+  -settings <path>              Specify custom path to settings.json
+  -bin <path>                   Specify custom binary path to configure
+  -no-copy                      Skip copying binary to ~/.local/bin
+`, Version)
+}
 
 func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 	raw, _ := io.ReadAll(r)
@@ -60,6 +78,23 @@ func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "init":
+			if err := installer.RunInit(os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "Error initializing statusline: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "--version", "-v", "version":
+			fmt.Printf("statusline version %s\n", Version)
+			return
+		case "--help", "-h", "help":
+			printHelp()
+			return
+		}
+	}
+
 	cfg, err := config.LoadConfig("")
 	if err != nil {
 		cfg = config.DefaultConfig()
