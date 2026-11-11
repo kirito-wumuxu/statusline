@@ -82,44 +82,50 @@ mv statusline statusline-server ~/.local/bin/
 
 ## 🔧 配置与接入
 
-### 1. 一键自动配置 Antigravity CLI (`statusline init`)
+### 1. 一键自动配置 (`statusline init`)
 
-推荐使用一键初始化命令自动完成配置：
+推荐使用一键初始化命令完成 Antigravity CLI 与 Claude Code 的全自动配置：
 
 ```bash
 statusline init
 ```
 
-该命令将自动：
-1. 自动将 `statusline` 二进制复制安装至 `~/.local/bin/statusline`；
-2. 自动定位并安全配置 `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`），写入 `"statusLine.command"` 与 `"statusLine.enabled: true"`，同时保留文件中原有的其他所有配置项；
-3. 重启 Antigravity CLI 即可立刻体验实时状态栏！
+该命令具备高度智能与免侵入设计：
+1. **原地绝对路径解析**：自动解析当前运行可执行文件的真实绝对路径（无需移动或复制二进制文件，放置在任意目录均可直接初始化）；
+2. **多工具并发配置**：
+   - **Antigravity CLI**：自动定位并安全配置 `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`），写入 `"statusLine"` 块，无损保留原有其他配置；
+   - **Claude Code**：自动配置 `~/.claude/settings.json`（及当前工作区的 `.claude/settings.json`），写入标准 `"statusLine": {"type": "command", "command": "..."}` 配置；
+3. 执行完成后，重启 Antigravity CLI 或 Claude Code 即可即时呈现状态栏。
 
-> **高级参数**：
+> **高级选项**：
+> - `statusline init -target claude`：仅配置 Claude Code；
+> - `statusline init -target agy`：仅配置 Antigravity CLI；
 > - `statusline init -settings /path/to/settings.json`：指定自定义配置文件路径；
-> - `statusline init -bin /custom/bin/statusline`：指定自定义二进制路径；
-> - `statusline init -no-copy`：仅修改配置文件，跳过二进制复制。
+> - `statusline init -bin /custom/bin/statusline`：指定自定义二进制路径。
 
-### 2. 手动接入 Antigravity CLI (`agy`)
+### 2. 手动接入配置说明
 
-若需要手动配置，可直接编辑 `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`）：
-
-```json
-{
-  "statusLine": {
-    "command": "~/.local/bin/statusline",
-    "enabled": true
+若需手动维护配置文件：
+- **Antigravity CLI**（`~/.gemini/antigravity-cli/settings.json`）：
+  ```json
+  {
+    "statusLine": {
+      "type": "command",
+      "command": "/absolute/path/to/statusline",
+      "enabled": true
+    }
   }
-}
-```
-
-### 3. 接入 Anthropic Claude Code
-
-配置 Claude Code 的状态栏输出钩子，将管道指向 `statusline`：
-
-```bash
-export CLAUDE_STATUSLINE_COMMAND="statusline"
-```
+  ```
+- **Claude Code**（`~/.claude/settings.json`）：
+  ```json
+  {
+    "statusLine": {
+      "type": "command",
+      "command": "/absolute/path/to/statusline"
+    }
+  }
+  ```
+  *(也可使用环境变量 `export CLAUDE_STATUSLINE_COMMAND="/absolute/path/to/statusline"`)*
 
 ### 4. 环境变量与无服务器模式 (Pure Local)
 

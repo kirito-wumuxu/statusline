@@ -22,14 +22,14 @@ func printHelp() {
 
 Usage:
   statusline                    Render statusline from stdin JSON (called by AI CLI)
-  statusline init [options]     Automatically configure Antigravity settings.json
+  statusline init [options]     Auto-configure settings.json for Antigravity & Claude Code
   statusline --version, -v      Print version information
   statusline --help, -h         Show this help message
 
 Init Options:
+  -target <all|agy|claude>      Target CLI to configure (default: all)
   -settings <path>              Specify custom path to settings.json
-  -bin <path>                   Specify custom binary path to configure
-  -no-copy                      Skip copying binary to ~/.local/bin
+  -bin <path>                   Specify custom binary path (default: in-place binary location)
 `, Version)
 }
 

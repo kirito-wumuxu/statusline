@@ -122,7 +122,7 @@ func TestInitCommandIntegration(t *testing.T) {
 	binPath := "/usr/local/bin/statusline"
 
 	var out bytes.Buffer
-	err := installer.RunInit([]string{"-settings", settingsPath, "-bin", binPath, "-no-copy"}, &out)
+	err := installer.RunInit([]string{"-settings", settingsPath, "-bin", binPath}, &out)
 	if err != nil {
 		t.Fatalf("RunInit failed: %v", err)
 	}

@@ -9,13 +9,13 @@ import (
 	"testing"
 )
 
-func TestConfigureNewSettingsFile(t *testing.T) {
+func TestConfigureAntigravitySettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	settingsPath := filepath.Join(tmpDir, "sub", "settings.json")
 	binPath := "/opt/bin/statusline"
 
 	var out bytes.Buffer
-	err := RunInit([]string{"-settings", settingsPath, "-bin", binPath, "-no-copy"}, &out)
+	err := RunInit([]string{"-settings", settingsPath, "-bin", binPath}, &out)
 	if err != nil {
 		t.Fatalf("RunInit failed: %v", err)
 	}
@@ -38,11 +38,45 @@ func TestConfigureNewSettingsFile(t *testing.T) {
 	if statusLine["command"] != binPath {
 		t.Errorf("expected command %s, got %v", binPath, statusLine["command"])
 	}
+	if statusLine["type"] != "command" {
+		t.Errorf("expected type command, got %v", statusLine["type"])
+	}
 	if statusLine["enabled"] != true {
 		t.Errorf("expected enabled true, got %v", statusLine["enabled"])
 	}
-	if !strings.Contains(out.String(), "Statusline initialized successfully") {
-		t.Errorf("expected success message in output, got: %s", out.String())
+}
+
+func TestConfigureClaudeCodeSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudePath := filepath.Join(tmpDir, ".claude", "settings.json")
+	binPath := "/home/user/workspace/statusline/bin/statusline"
+
+	var out bytes.Buffer
+	err := RunInit([]string{"-settings", claudePath, "-bin", binPath}, &out)
+	if err != nil {
+		t.Fatalf("RunInit failed: %v", err)
+	}
+
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("failed to read created claude settings: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	statusLine, ok := parsed["statusLine"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected statusLine object in JSON")
+	}
+
+	if statusLine["command"] != binPath {
+		t.Errorf("expected command %s, got %v", binPath, statusLine["command"])
+	}
+	if statusLine["type"] != "command" {
+		t.Errorf("expected type command, got %v", statusLine["type"])
 	}
 }
 
@@ -66,7 +100,7 @@ func TestConfigureExistingSettingsPreservesFields(t *testing.T) {
 
 	newBin := "/new/path/statusline"
 	var out bytes.Buffer
-	err := RunInit([]string{"-settings", settingsPath, "-bin", newBin, "-no-copy"}, &out)
+	err := RunInit([]string{"-settings", settingsPath, "-bin", newBin}, &out)
 	if err != nil {
 		t.Fatalf("RunInit failed: %v", err)
 	}
@@ -94,10 +128,43 @@ func TestConfigureExistingSettingsPreservesFields(t *testing.T) {
 	if statusLine["command"] != newBin {
 		t.Errorf("expected new command %s, got %v", newBin, statusLine["command"])
 	}
-	if statusLine["enabled"] != true {
-		t.Errorf("expected enabled true, got %v", statusLine["enabled"])
+	if statusLine["type"] != "command" {
+		t.Errorf("expected type command, got %v", statusLine["type"])
 	}
-	if statusLine["type"] != "custom" {
-		t.Errorf("expected type custom preserved, got %v", statusLine["type"])
+}
+
+func TestInPlaceBinaryResolution(t *testing.T) {
+	tmpDir := t.TempDir()
+	settingsPath := filepath.Join(tmpDir, "settings.json")
+
+	var out bytes.Buffer
+	// Without -bin, it resolves running executable directly
+	err := RunInit([]string{"-settings", settingsPath}, &out)
+	if err != nil {
+		t.Fatalf("RunInit failed: %v", err)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "Using statusline binary at:") {
+		t.Errorf("expected output to state using binary at, got: %s", outStr)
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("failed to read settings: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	statusLine := parsed["statusLine"].(map[string]any)
+	cmdVal, ok := statusLine["command"].(string)
+	if !ok || cmdVal == "" {
+		t.Errorf("expected non-empty command path, got %v", statusLine["command"])
+	}
+	if !filepath.IsAbs(cmdVal) {
+		t.Errorf("expected absolute command path, got %s", cmdVal)
 	}
 }
