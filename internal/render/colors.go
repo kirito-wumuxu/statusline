@@ -24,6 +24,7 @@ const (
 	AnsiSkyBlue     = "\033[38;5;39m"  // Directory indicator
 	AnsiOrange      = "\033[38;5;208m" // Claude brand accent
 	AnsiLavender    = "\033[38;5;141m" // Git / VCS branch accent
+	AnsiAmber       = "\033[38;5;214m" // Account email accent
 )
 
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)

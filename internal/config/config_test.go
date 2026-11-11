@@ -17,14 +17,26 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Server.DBPath == "" {
 		t.Fatalf("expected non-empty default db path")
 	}
+	if len(cfg.Display.Segments) != 7 {
+		t.Fatalf("expected 7 default segments, got %d", len(cfg.Display.Segments))
+	}
+	if cfg.Display.Segments[2] != "account" {
+		t.Fatalf("expected 3rd segment to be account, got %s", cfg.Display.Segments[2])
+	}
 }
 
 func TestEnvOverrides(t *testing.T) {
 	os.Setenv("STATUSLINE_SERVER_URL", "http://custom:9999/api/v1/report")
 	defer os.Unsetenv("STATUSLINE_SERVER_URL")
+	os.Setenv("STATUSLINE_SEGMENTS", "account,model,tokens")
+	defer os.Unsetenv("STATUSLINE_SEGMENTS")
+
 	cfg := DefaultConfig()
 	if cfg.Server.Endpoint != "http://custom:9999/api/v1/report" {
 		t.Fatalf("expected env override, got %s", cfg.Server.Endpoint)
+	}
+	if len(cfg.Display.Segments) != 3 || cfg.Display.Segments[0] != "account" {
+		t.Fatalf("expected segments override, got %v", cfg.Display.Segments)
 	}
 }
 
@@ -37,6 +49,11 @@ server:
   timeout_ms: 150
 node:
   id: "test-node"
+display:
+  segments:
+    - account
+    - model
+    - tokens
 `
 	configPath := filepath.Join(tmpDir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
@@ -55,5 +72,8 @@ node:
 	}
 	if cfg.Node.ID != "test-node" {
 		t.Errorf("expected node ID test-node, got %s", cfg.Node.ID)
+	}
+	if len(cfg.Display.Segments) != 3 || cfg.Display.Segments[0] != "account" {
+		t.Errorf("expected loaded segments [account model tokens], got %v", cfg.Display.Segments)
 	}
 }

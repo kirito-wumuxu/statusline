@@ -41,7 +41,11 @@ func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 	}
 
 	homeDir, _ := os.UserHomeDir()
-	line := render.AssembleLine(data, homeDir)
+	var segments []string
+	if cfg != nil && len(cfg.Display.Segments) > 0 {
+		segments = cfg.Display.Segments
+	}
+	line := render.AssembleLine(data, homeDir, segments)
 	_, _ = io.WriteString(w, line)
 
 	// CRIT-1: Terminal output is already written. Synchronously report with strict timeout

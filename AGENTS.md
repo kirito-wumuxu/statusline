@@ -10,11 +10,12 @@
 ## 2. 终端显示与美学色彩规范
 
 ```text
-[~] (main*) [Gemini 3.8 Flash (High)] \\\\\\\\ 0% [1M] | ↑0 ↓0 | Gemini: 93%(2h10m) 89%(5d18h) | Claude: 100%(4h59m) 99%(5d18h)
+[~] (main*) <kirito_wu@163.com> [Gemini 3.8 Flash (High)] \\\\\\\\ 0% [1M] | ↑0 ↓0 | Gemini: 93%(2h10m) 89%(5d18h) | Claude: 100%(4h59m) 99%(5d18h)
 ```
 
 - **工作区目录 `[~]`**：天蓝色（Sky Blue `\033[38;5;39m`），家目录自动折叠为 `~`。
 - **Git 仓库分支 `(main*)`**：浅薰衣草紫（Lavender `\033[38;5;141m`），脏工作区带黄色标记（Yellow `*`）。
+- **账号标识 `<user@email.com>`**：暖琥珀金（Amber `\033[38;5;214m`），暗灰尖括号（`\033[90m< >\033[0m`），无账号时自动跳过。
 - **模型标识 `[Gemini 3.8 Flash (High)]`**：粗体亮绿（Bold Bright Green `\033[1;32m`）。
 - **上下文进度 `\\\\\\\\ 22% [1M]`**：
   - 8 段斜杠进度条：`<70%` 绿、`70-89%` 黄、`≥90%` 红；未用进度为暗灰（`\033[90m`）。
@@ -51,6 +52,15 @@
 │   ├── node/                       # 跨平台硬件指纹 (Linux/Windows Machine-ID -> SHA256)
 │   ├── model/                      # 遥测模型、归一化与 UTF-8 乱码清洗器
 │   ├── render/                     # 终端 ANSI 状态栏渲染核心与自适应排版
+│   │   ├── colors.go               # ANSI 色彩与代码剥除
+│   │   ├── layout.go               # 模块化驱动排版与 Level 1~3 降级
+│   │   ├── segment_account.go      # 账号尖括号渲染与前缀截断
+│   │   ├── segment_context.go      # 8 段斜杠进度条与百分比
+│   │   ├── segment_dir.go          # 家目录折叠与工作区指示
+│   │   ├── segment_model.go        # 模型名称与 Effort 深度
+│   │   ├── segment_quota.go        # 多阶配额与重置倒计时
+│   │   ├── segment_tokens.go       # 紧凑单位 Token 吞吐
+│   │   └── segment_vcs.go          # Git 分支与脏标记
 │   ├── vcs/                        # Git 超时探测工具 (20ms 熔断)
 │   ├── reporter/                   # 客户端非阻塞异步上报器 (100ms 超时，静默丢弃异常)
 │   ├── storage/                    # SQLite3 WAL 存储引擎 (nodes, sessions, events, quotas)

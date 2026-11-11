@@ -21,7 +21,7 @@
 `statusline` 在标准输入中读取 CLI 传入的会话实时 JSON，在 **<2ms** 内向终端 `stdout` 输出高辨识度的 ANSI 彩色状态栏：
 
 ```text
-[~] (main*) [Gemini 3.8 Flash (High)] \\\\\\\\ 22% [1M] | ↑1.5k ↓230 | Gemini: 93%(2h10m) 89%(5d18h) | Claude: 100%(4h59m) 99%(5d18h)
+[~] (main*) <kirito_wu@163.com> [Gemini 3.8 Flash (High)] \\\\\\\\ 22% [1M] | ↑1.5k ↓230 | Gemini: 93%(2h10m) 89%(5d18h) | Claude: 100%(4h59m) 99%(5d18h)
 ```
 
 ### 状态栏分段解析
@@ -30,6 +30,7 @@
 | :--- | :--- |
 | **`[~]` / `[/workspace]`** | **工作区目录**：天蓝色（Sky Blue `\033[38;5;39m`），自动将家目录折叠为 `~` |
 | **`(main*)`** | **Git 仓库探针**：浅薰衣草紫（Lavender `\033[38;5;141m`），脏工作区带黄色星号标记（`*`），20ms 熔断保护 |
+| **`<user@email.com>`** | **账号标识**：暖琥珀金（Amber `\033[38;5;214m`），有账号时呈现，无账号时自动跳过不占位 |
 | **`[Gemini 3.8 Flash (High)]`** | **模型与思考等级**：粗体亮绿，自动提取并归一化 Effort 等级（Low / Medium / High） |
 | **`\\\\\\\\ 22% [1M]`** | **上下文容量进度条**：8 段斜杠条。`<70%` 绿、`70-89%` 黄、`≥90%` 红；未用进度为暗灰，白字标注总窗口 |
 | **`↑1.5k ↓230`** | **会话 Token 吞吐**：明青色 `↑` 输入 Token，品红色 `↓` 输出 Token，智能紧凑单位（`k`, `M`） |
@@ -109,6 +110,28 @@ export CLAUDE_STATUSLINE_COMMAND="statusline"
   ```bash
   export STATUSLINE_SERVER_URL="off"
   ```
+
+### 4. 模块化状态栏与自定义排序 (`config.yaml`)
+
+可在 `config.yaml` 中通过 `display.segments` 列表自由调换模块前后顺序，或注释/移除不需要的模块：
+
+```yaml
+display:
+  enable_stdout: true
+  segments:
+    - dir         # 工作区目录 [~] 或 [/path]
+    - vcs         # Git 分支与修改标记 (main*)
+    - account     # 账号信息 <user@email.com>（无账号时自动跳过）
+    - model       # 模型名称与思考等级 [Gemini 3.8 Flash (High)]
+    - context     # 上下文进度条 \\\\\\\\ 22% [1M]
+    - tokens      # Token 吞吐 ↑1.5k ↓230
+    - quota       # 配额余量与冷却倒计时
+```
+
+也可通过环境变量快速覆盖展示顺序：
+```bash
+export STATUSLINE_SEGMENTS="account,model,context,tokens,quota"
+```
 
 ---
 

@@ -29,8 +29,13 @@ type NodeConfig struct {
 }
 
 type DisplayConfig struct {
-	EnableStdout bool   `yaml:"enable_stdout"`
-	Format       string `yaml:"format"`
+	EnableStdout bool     `yaml:"enable_stdout"`
+	Format       string   `yaml:"format"`
+	Segments     []string `yaml:"segments"`
+}
+
+func DefaultSegments() []string {
+	return []string{"dir", "vcs", "account", "model", "context", "tokens", "quota"}
 }
 
 func DefaultConfig() *Config {
@@ -52,6 +57,7 @@ func DefaultConfig() *Config {
 		Display: DisplayConfig{
 			EnableStdout: true,
 			Format:       "[{{.Product}}] {{.Model}} | Ctx: {{.UsedPct}}% | {{.Tokens}}",
+			Segments:     DefaultSegments(),
 		},
 	}
 
@@ -83,6 +89,10 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
+	if len(cfg.Display.Segments) == 0 {
+		cfg.Display.Segments = DefaultSegments()
+	}
+
 	applyEnvOverrides(cfg)
 	cfg.Server.DBPath = expandHome(cfg.Server.DBPath)
 	return cfg, nil
@@ -101,6 +111,18 @@ func applyEnvOverrides(cfg *Config) {
 	if portStr := os.Getenv("STATUSLINE_PORT"); portStr != "" {
 		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
 			cfg.Server.Port = p
+		}
+	}
+	if segStr := os.Getenv("STATUSLINE_SEGMENTS"); segStr != "" {
+		var segs []string
+		for _, s := range strings.Split(segStr, ",") {
+			trimmed := strings.TrimSpace(s)
+			if trimmed != "" {
+				segs = append(segs, trimmed)
+			}
+		}
+		if len(segs) > 0 {
+			cfg.Display.Segments = segs
 		}
 	}
 }

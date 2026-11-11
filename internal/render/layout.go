@@ -8,28 +8,14 @@ import (
 )
 
 // AssembleLine builds the complete ANSI-formatted statusline, applying
-// adaptive compaction if data.TerminalWidth is specified and too narrow.
-func AssembleLine(data *model.StatusLineData, homeDir string) string {
-	sep := fmt.Sprintf("%s|%s", AnsiDarkGray, AnsiReset)
-
-	// Build standard components
-	dirStr := FormatDir(data, homeDir)
-	vcsStr := FormatVCS(data)
-	modelStr := FormatModel(data)
-	ctxStr := FormatContext(data)
-	tokensStr := FormatTokens(data)
-	quotaStr := FormatQuota(data)
-
-	// Combine components
-	var parts []string
-	if dirStr != "" {
-		parts = append(parts, dirStr)
+// modular segment rendering and adaptive compaction if data.TerminalWidth is specified.
+func AssembleLine(data *model.StatusLineData, homeDir string, customSegments ...[]string) string {
+	segments := []string{"dir", "vcs", "account", "model", "context", "tokens", "quota"}
+	if len(customSegments) > 0 && len(customSegments[0]) > 0 {
+		segments = customSegments[0]
 	}
-	if vcsStr != "" {
-		parts = append(parts, vcsStr)
-	}
-	parts = append(parts, modelStr, ctxStr, sep, tokensStr, sep, quotaStr)
-	fullLine := strings.Join(parts, " ")
+
+	fullLine := buildLine(data, homeDir, segments, 0)
 
 	termWidth := 0
 	if data != nil && data.TerminalWidth > 0 {
@@ -41,41 +27,107 @@ func AssembleLine(data *model.StatusLineData, homeDir string) string {
 		return fullLine
 	}
 
-	// Level 1: Compact model and quota labels
-	modelCompact := formatModelCompact(data)
-	quotaCompact := formatQuotaCompact(data, false)
-	parts = nil
-	if dirStr != "" {
-		parts = append(parts, dirStr)
-	}
-	if vcsStr != "" {
-		parts = append(parts, vcsStr)
-	}
-	parts = append(parts, modelCompact, ctxStr, sep, tokensStr, sep, quotaCompact)
-	l1 := strings.Join(parts, " ")
+	// Level 1: Compact model, account, and quota labels
+	l1 := buildLine(data, homeDir, segments, 1)
 	if len(StripANSI(l1)) <= termWidth {
 		return l1
 	}
 
 	// Level 2: Compact context bar (4 slashes) and single-bucket quota
-	ctxCompact := formatContextCompact(data)
-	quotaUltra := formatQuotaCompact(data, true)
-	parts = nil
-	if dirStr != "" {
-		parts = append(parts, dirStr)
-	}
-	if vcsStr != "" {
-		parts = append(parts, vcsStr)
-	}
-	parts = append(parts, modelCompact, ctxCompact, sep, tokensStr, sep, quotaUltra)
-	l2 := strings.Join(parts, " ")
+	l2 := buildLine(data, homeDir, segments, 2)
 	if len(StripANSI(l2)) <= termWidth {
 		return l2
 	}
 
-	// Level 3: Ultra narrow (e.g. < 70 chars) - drop dir and keep core stats
-	parts = []string{modelCompact, ctxCompact, sep, tokensStr, sep, quotaUltra}
+	// Level 3: Ultra narrow (e.g. < 70 chars) - drop dir, vcs, account and keep core stats
+	return buildLine(data, homeDir, segments, 3)
+}
+
+func buildLine(data *model.StatusLineData, homeDir string, segments []string, level int) string {
+	sep := fmt.Sprintf("%s|%s", AnsiDarkGray, AnsiReset)
+
+	hasExplicitSep := false
+	for _, s := range segments {
+		clean := strings.TrimSpace(s)
+		if clean == "|" || clean == "sep" {
+			hasExplicitSep = true
+			break
+		}
+	}
+
+	var parts []string
+	needSep := false
+
+	for _, rawSeg := range segments {
+		clean := strings.ToLower(strings.TrimSpace(rawSeg))
+		if clean == "|" || clean == "sep" {
+			if len(parts) > 0 {
+				needSep = true
+			}
+			continue
+		}
+
+		// Level 3 (ultra narrow): drop non-essential contextual segments
+		if level == 3 && (clean == "dir" || clean == "cwd" || clean == "vcs" || clean == "git" || clean == "account" || clean == "user" || clean == "email") {
+			continue
+		}
+
+		txt := renderSegment(clean, data, homeDir, level)
+		if txt == "" {
+			continue
+		}
+
+		// If no explicit separator was configured, auto-insert pipe before tokens and quota
+		if !hasExplicitSep && (clean == "tokens" || clean == "quota") {
+			if len(parts) > 0 && parts[len(parts)-1] != sep {
+				needSep = true
+			}
+		}
+
+		if needSep && len(parts) > 0 && parts[len(parts)-1] != sep {
+			parts = append(parts, sep)
+		}
+		needSep = false
+
+		parts = append(parts, txt)
+	}
+
 	return strings.Join(parts, " ")
+}
+
+func renderSegment(name string, data *model.StatusLineData, homeDir string, level int) string {
+	switch name {
+	case "dir", "cwd":
+		return FormatDir(data, homeDir)
+	case "vcs", "git":
+		return FormatVCS(data)
+	case "account", "user", "email":
+		if level == 0 {
+			return FormatAccount(data)
+		}
+		return formatAccountCompact(data)
+	case "model":
+		if level == 0 {
+			return FormatModel(data)
+		}
+		return formatModelCompact(data)
+	case "context", "ctx":
+		if level <= 1 {
+			return FormatContext(data)
+		}
+		return formatContextCompact(data)
+	case "tokens":
+		return FormatTokens(data)
+	case "quota":
+		if level == 0 {
+			return FormatQuota(data)
+		} else if level == 1 {
+			return formatQuotaCompact(data, false)
+		}
+		return formatQuotaCompact(data, true)
+	default:
+		return ""
+	}
 }
 
 func formatModelCompact(data *model.StatusLineData) string {

@@ -10,6 +10,7 @@ import (
 
 	"statusline/internal/config"
 	"statusline/internal/node"
+	"statusline/internal/render"
 	"statusline/internal/vcs"
 )
 
@@ -85,5 +86,29 @@ func TestExecuteGitStatusIntegration(t *testing.T) {
 	branch, _, _, _ := vcs.GetGitStatus(".", 500*time.Millisecond)
 	if branch != "" && !strings.Contains(result, "("+branch) {
 		t.Errorf("expected branch (%s) in statusline output, got %s", branch, result)
+	}
+}
+
+func TestExecuteAccountAndSegments(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.Endpoint = "off"
+	cfg.Display.Segments = []string{"account", "model"}
+	n := node.GetNodeInfo("node_test", "1.0.0")
+
+	rawJSON := `{"product":"antigravity","email":"kirito_wu@163.com","model":{"display_name":"Flash"},"cwd":"/tmp"}`
+	var out bytes.Buffer
+
+	execute(bytes.NewBufferString(rawJSON), &out, cfg, n)
+
+	result := out.String()
+	plain := render.StripANSI(result)
+	if !strings.Contains(plain, "<kirito_wu@163.com>") {
+		t.Errorf("expected account in output, got %q", plain)
+	}
+	if !strings.Contains(plain, "[Flash]") {
+		t.Errorf("expected model in output, got %q", plain)
+	}
+	if strings.Contains(plain, "[/tmp]") {
+		t.Errorf("expected dir omitted due to custom segments, got %q", plain)
 	}
 }
