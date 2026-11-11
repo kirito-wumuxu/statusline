@@ -402,3 +402,46 @@ func (s *Store) GetAccountQuotas() ([]QuotaRecord, error) {
 	}
 	return list, nil
 }
+
+
+type MetricPoint struct {
+	Timestamp   int64 `json:"timestamp"`
+	TotalTokens int64 `json:"total_tokens"`
+}
+
+func (s *Store) GetRecentMetrics(limit int) ([]MetricPoint, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+	SELECT reported_at, (total_input_tokens + total_output_tokens)
+	FROM telemetry_events
+	ORDER BY id ASC
+	LIMIT ?`
+
+	rows, err := s.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []MetricPoint
+	for rows.Next() {
+		var repAt string
+		var tokens int64
+		if err := rows.Scan(&repAt, &tokens); err != nil {
+			return nil, err
+		}
+		var ts int64
+		if t, err := time.Parse(time.RFC3339Nano, repAt); err == nil {
+			ts = t.Unix()
+		} else {
+			ts = time.Now().Unix()
+		}
+		points = append(points, MetricPoint{
+			Timestamp:   ts,
+			TotalTokens: tokens,
+		})
+	}
+	return points, nil
+}

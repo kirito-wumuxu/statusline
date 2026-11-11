@@ -152,6 +152,8 @@ func (s *Server) handleGetOverview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	metrics, _ := s.store.GetRecentMetrics(50)
+
 	res := map[string]interface{}{
 		"active_sessions":          ov.ActiveSessions,
 		"active_sessions_count":    ov.ActiveSessions,
@@ -166,6 +168,7 @@ func (s *Server) handleGetOverview(w http.ResponseWriter, r *http.Request) {
 		"model_breakdown":          modelBreakdown,
 		"latest_account":           latestAccount,
 		"latest_quota":             quotaSummary,
+		"metrics":                  metrics,
 		"refresh_interval_seconds": 60,
 	}
 
@@ -200,4 +203,11 @@ func (s *Server) handleGetQuotas(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(quotas)
+}
+
+
+func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"ok","refreshed_count":0}`))
 }

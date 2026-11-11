@@ -31,3 +31,25 @@ func TestServerWebAssets(t *testing.T) {
 		t.Fatalf("expected 200 OK from web root, got %d", w.Code)
 	}
 }
+
+
+func TestManualRefreshWithWebFS(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "web_refresh_test.db")
+	store, err := storage.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	cfg := config.DefaultConfig()
+	srv := server.NewServer(cfg, store, webFS)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/refresh", nil)
+	w := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/refresh with webFS, got %d", w.Code)
+	}
+}

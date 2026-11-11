@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -38,5 +40,48 @@ func TestExecuteStatuslineValid(t *testing.T) {
 	result := out.String()
 	if !strings.Contains(result, "[Flash]") {
 		t.Errorf("expected [Flash] in output, got %q", result)
+	}
+}
+
+func TestExecuteSynchronousReporting(t *testing.T) {
+	// CRIT-1: Verify execute synchronously finishes reporting before returning so CLI exit doesn't kill it
+	reported := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reported = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Server.Endpoint = ts.URL
+	cfg.Server.TimeoutMS = 500
+	n := node.GetNodeInfo("node_test", "1.0.0")
+
+	rawJSON := `{"product":"antigravity","model":{"id":"gemini-3.8-flash"}}`
+	var out bytes.Buffer
+
+	execute(bytes.NewBufferString(rawJSON), &out, cfg, n)
+
+	// Since execute has returned, reporting must ALREADY be finished (no time.Sleep needed!)
+	if !reported {
+		t.Fatalf("expected execute to synchronously finish report before returning")
+	}
+}
+
+func TestExecuteGitStatusIntegration(t *testing.T) {
+	// IMP-1: Verify execute probes git status when cwd is present
+	cfg := config.DefaultConfig()
+	cfg.Server.Endpoint = "off"
+	n := node.GetNodeInfo("node_test", "1.0.0")
+
+	rawJSON := `{"product":"antigravity","model":{"id":"gemini-3.8-flash"},"cwd":"."}`
+	var out bytes.Buffer
+
+	execute(bytes.NewBufferString(rawJSON), &out, cfg, n)
+
+	result := out.String()
+	// Current repository is on feat/statusline-sqlite, which should be detected
+	if !strings.Contains(result, "feat/statusline-sqlite") {
+		t.Errorf("expected branch feat/statusline-sqlite in statusline output, got %s", result)
 	}
 }

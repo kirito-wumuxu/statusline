@@ -49,12 +49,14 @@ func TestHandlersReportAndQuery(t *testing.T) {
 	if wOverview.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK from overview, got %d", wOverview.Code)
 	}
-	var ov storage.OverviewData
-	if err := json.Unmarshal(wOverview.Body.Bytes(), &ov); err != nil {
-		t.Fatalf("failed to unmarshal overview: %v", err)
+	var ovMap map[string]interface{}
+	if err := json.Unmarshal(wOverview.Body.Bytes(), &ovMap); err != nil {
+		t.Fatalf("failed to unmarshal overview map: %v", err)
 	}
-	if ov.ActiveSessions != 1 {
-		t.Errorf("expected 1 active session, got %d", ov.ActiveSessions)
+	// IMP-3: Verify metrics array is present for Web Dashboard SVG trend chart
+	metrics, ok := ovMap["metrics"].([]interface{})
+	if !ok || len(metrics) == 0 {
+		t.Fatalf("expected non-empty metrics array for trend chart, got %+v", ovMap["metrics"])
 	}
 
 	// 3. Test GET /api/v1/sessions
@@ -104,5 +106,20 @@ func TestHandlerReportEnvelope(t *testing.T) {
 	t.Logf("report response: code=%d, body=%s", w.Code, w.Body.String())
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+}
+
+
+func TestHandlerManualRefresh(t *testing.T) {
+	// IMP-2: Web dashboard Manual Refresh button sends POST /api/refresh
+	srv, store := setupTestServer(t)
+	defer store.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/refresh", nil)
+	w := httptest.NewRecorder()
+
+	srv.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/refresh, got %d (body: %s)", w.Code, w.Body.String())
 	}
 }

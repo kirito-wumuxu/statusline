@@ -34,6 +34,8 @@ func (s *Server) routes() {
 	// Ingestion endpoint (POST /api/v1/report and alias /api/telemetry)
 	s.router.HandleFunc("POST /api/v1/report", s.handleReport)
 	s.router.HandleFunc("POST /api/telemetry", s.handleReport)
+	s.router.HandleFunc("POST /api/v1/refresh", s.handleRefresh)
+	s.router.HandleFunc("POST /api/refresh", s.handleRefresh)
 
 	// REST APIs
 	s.router.HandleFunc("GET /api/v1/sessions", s.handleGetSessions)
