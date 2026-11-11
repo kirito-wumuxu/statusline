@@ -1,0 +1,16 @@
+server:
+  endpoint: "http://127.0.0.1:8765/api/v1/report"
+  api_key: ""
+  timeout_ms: 100               # 客户端上报超时严格控制在 100ms
+  port: 8765
+  db_path: "~/.local/share/statusline/statusline.db"
+
+node:
+  # 留空则自动提取硬件指纹并 SHA256 脱敏 (如 node_8f9d2a1b4c3e5f6a)
+  id: ""
+  custom_tags:
+    env: "local"
+
+display:
+  enable_stdout: true
+  format: "[{{.Product}}] {{.Model}} | Ctx: {{.UsedPct}}% | {{.Tokens}}"
