@@ -205,48 +205,38 @@ func formatContextCompact(data *model.StatusLineData) string {
 }
 
 func formatQuotaCompact(data *model.StatusLineData, singleBucketOnly bool) string {
-	geminiBuckets := []bucketInfo{}
-	claudeBuckets := []bucketInfo{}
-
-	if data != nil && data.Quota != nil {
-		for k, b := range data.Quota {
-			lower := strings.ToLower(k)
-			item := bucketInfo{key: k, bucket: b, remaining: int(b.RemainingFraction * 100)}
-			if strings.Contains(lower, "gemini") {
-				geminiBuckets = append(geminiBuckets, item)
-			} else if strings.Contains(lower, "claude") || strings.Contains(lower, "sonnet") || strings.Contains(lower, "opus") || strings.Contains(lower, "3p") {
-				claudeBuckets = append(claudeBuckets, item)
-			}
-		}
+	geminiBuckets, claudeBuckets := extractProviderBuckets(data)
+	if len(geminiBuckets) == 0 && len(claudeBuckets) == 0 {
+		return ""
 	}
 
-	gStr := "100%"
+	var parts []string
 	if len(geminiBuckets) > 0 {
 		b := geminiBuckets[0]
 		dur := FormatDurationCompact(b.bucket.ResetInSeconds)
-		gStr = formatBucketItem(b.remaining, dur)
+		gStr := formatBucketItem(b.remaining, dur)
 		if !singleBucketOnly && len(geminiBuckets) > 1 {
 			b2 := geminiBuckets[1]
 			dur2 := FormatDurationCompact(b2.bucket.ResetInSeconds)
 			gStr = fmt.Sprintf("%s %s", gStr, formatBucketItem(b2.remaining, dur2))
 		}
+		gLabel := fmt.Sprintf("%sG:%s", AnsiBrightCyan, AnsiReset)
+		parts = append(parts, fmt.Sprintf("%s %s", gLabel, gStr))
 	}
 
-	cStr := "100%"
 	if len(claudeBuckets) > 0 {
 		b := claudeBuckets[0]
 		dur := FormatDurationCompact(b.bucket.ResetInSeconds)
-		cStr = formatBucketItem(b.remaining, dur)
+		cStr := formatBucketItem(b.remaining, dur)
 		if !singleBucketOnly && len(claudeBuckets) > 1 {
 			b2 := claudeBuckets[1]
 			dur2 := FormatDurationCompact(b2.bucket.ResetInSeconds)
 			cStr = fmt.Sprintf("%s %s", cStr, formatBucketItem(b2.remaining, dur2))
 		}
+		cLabel := fmt.Sprintf("%sC:%s", AnsiOrange, AnsiReset)
+		parts = append(parts, fmt.Sprintf("%s %s", cLabel, cStr))
 	}
 
-	sep := fmt.Sprintf("%s|%s", AnsiDarkGray, AnsiReset)
-	gLabel := fmt.Sprintf("%sG:%s", AnsiBrightCyan, AnsiReset)
-	cLabel := fmt.Sprintf("%sC:%s", AnsiOrange, AnsiReset)
-
-	return fmt.Sprintf("%s %s %s %s %s", gLabel, gStr, sep, cLabel, cStr)
+	sep := fmt.Sprintf(" %s|%s ", AnsiDarkGray, AnsiReset)
+	return strings.Join(parts, sep)
 }

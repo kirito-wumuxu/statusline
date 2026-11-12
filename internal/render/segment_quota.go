@@ -36,55 +36,72 @@ func FormatDurationCompact(seconds int64) string {
 	return fmt.Sprintf("%dm", remMinutes)
 }
 
-// FormatQuota renders the quota section:
-// e.g. "Gemini: 93%(2h10m) 89%(5d18h) | Claude: 100%(4h59m) 99%(5d18h)"
-func FormatQuota(data *model.StatusLineData) string {
-	geminiBuckets := []bucketInfo{}
-	claudeBuckets := []bucketInfo{}
+func extractProviderBuckets(data *model.StatusLineData) (gemini, claude []bucketInfo) {
+	if data == nil || data.Quota == nil {
+		return nil, nil
+	}
+	for k, b := range data.Quota {
+		lower := strings.ToLower(k)
+		remPct := int(math.Round(b.RemainingFraction * 100))
+		item := bucketInfo{key: k, bucket: b, remaining: remPct}
 
-	if data != nil && data.Quota != nil {
-		for k, b := range data.Quota {
-			lower := strings.ToLower(k)
-			remPct := int(math.Round(b.RemainingFraction * 100))
-			item := bucketInfo{key: k, bucket: b, remaining: remPct}
-
-			if strings.Contains(lower, "gemini") {
-				geminiBuckets = append(geminiBuckets, item)
-			} else if strings.Contains(lower, "claude") || strings.Contains(lower, "sonnet") || strings.Contains(lower, "opus") || strings.Contains(lower, "3p") {
-				claudeBuckets = append(claudeBuckets, item)
-			}
+		if strings.Contains(lower, "gemini") {
+			gemini = append(gemini, item)
+		} else if strings.Contains(lower, "claude") || strings.Contains(lower, "sonnet") || strings.Contains(lower, "opus") || strings.Contains(lower, "3p") {
+			claude = append(claude, item)
 		}
 	}
 
-	sort.Slice(geminiBuckets, func(i, j int) bool {
-		return geminiBuckets[i].bucket.ResetInSeconds < geminiBuckets[j].bucket.ResetInSeconds
+	sort.Slice(gemini, func(i, j int) bool {
+		return gemini[i].bucket.ResetInSeconds < gemini[j].bucket.ResetInSeconds
 	})
-	sort.Slice(claudeBuckets, func(i, j int) bool {
-		return claudeBuckets[i].bucket.ResetInSeconds < claudeBuckets[j].bucket.ResetInSeconds
+	sort.Slice(claude, func(i, j int) bool {
+		return claude[i].bucket.ResetInSeconds < claude[j].bucket.ResetInSeconds
 	})
 
-	geminiStr := formatProviderBuckets(geminiBuckets, "2h0m", "7d0h")
-	claudeStr := formatProviderBuckets(claudeBuckets, "5h0m", "7d0h")
-
-	geminiLabel := fmt.Sprintf("%sGemini:%s", AnsiBrightCyan, AnsiReset)
-	claudeLabel := fmt.Sprintf("%sClaude:%s", AnsiOrange, AnsiReset)
-	sep := fmt.Sprintf("%s|%s", AnsiDarkGray, AnsiReset)
-
-	return fmt.Sprintf("%s %s %s %s %s", geminiLabel, geminiStr, sep, claudeLabel, claudeStr)
+	return gemini, claude
 }
 
-func formatProviderBuckets(buckets []bucketInfo, defaultShortDuration, defaultLongDuration string) string {
-	shortStr := formatBucketItem(100, defaultShortDuration)
-	longStr := formatBucketItem(100, defaultLongDuration)
-
-	if len(buckets) >= 1 {
-		shortStr = formatBucketItem(buckets[0].remaining, FormatDurationCompact(buckets[0].bucket.ResetInSeconds))
+// FormatQuota renders the quota section:
+// e.g. "Gemini: 93%(2h10m) 89%(5d18h) | Claude: 100%(4h59m) 99%(5d18h)"
+// If no quota data exists for a provider, it is omitted.
+// If no quota data exists at all, returns an empty string.
+func FormatQuota(data *model.StatusLineData) string {
+	geminiBuckets, claudeBuckets := extractProviderBuckets(data)
+	if len(geminiBuckets) == 0 && len(claudeBuckets) == 0 {
+		return ""
 	}
-	if len(buckets) >= 2 {
-		longStr = formatBucketItem(buckets[1].remaining, FormatDurationCompact(buckets[1].bucket.ResetInSeconds))
+
+	var parts []string
+	if len(geminiBuckets) > 0 {
+		geminiLabel := fmt.Sprintf("%sGemini:%s", AnsiBrightCyan, AnsiReset)
+		geminiStr := formatProviderBuckets(geminiBuckets)
+		parts = append(parts, fmt.Sprintf("%s %s", geminiLabel, geminiStr))
 	}
 
-	return fmt.Sprintf("%s %s", shortStr, longStr)
+	if len(claudeBuckets) > 0 {
+		claudeLabel := fmt.Sprintf("%sClaude:%s", AnsiOrange, AnsiReset)
+		claudeStr := formatProviderBuckets(claudeBuckets)
+		parts = append(parts, fmt.Sprintf("%s %s", claudeLabel, claudeStr))
+	}
+
+	sep := fmt.Sprintf(" %s|%s ", AnsiDarkGray, AnsiReset)
+	return strings.Join(parts, sep)
+}
+
+func formatProviderBuckets(buckets []bucketInfo) string {
+	if len(buckets) == 0 {
+		return ""
+	}
+	var items []string
+	limit := 2
+	if len(buckets) < limit {
+		limit = len(buckets)
+	}
+	for i := 0; i < limit; i++ {
+		items = append(items, formatBucketItem(buckets[i].remaining, FormatDurationCompact(buckets[i].bucket.ResetInSeconds)))
+	}
+	return strings.Join(items, " ")
 }
 
 func formatBucketItem(remaining int, duration string) string {

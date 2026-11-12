@@ -186,3 +186,77 @@ func TestModularSegmentsExplicitSeparator(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected, plain)
 	}
 }
+
+func TestFormatQuotaEmptyWhenNoData(t *testing.T) {
+	// 1. Nil data
+	if got := FormatQuota(nil); got != "" {
+		t.Errorf("expected empty string for nil data, got %q", got)
+	}
+
+	// 2. Data without Quota map
+	data := &model.StatusLineData{
+		CWD: "/tmp",
+		Model: model.ModelInfo{DisplayName: "MiniMax-M3"},
+	}
+	if got := FormatQuota(data); got != "" {
+		t.Errorf("expected empty string when Quota is nil, got %q", got)
+	}
+
+	// 3. Data with empty Quota map
+	data.Quota = make(map[string]model.QuotaBucket)
+	if got := FormatQuota(data); got != "" {
+		t.Errorf("expected empty string when Quota map is empty, got %q", got)
+	}
+
+	// 4. AssembleLine does not output quota or trailing pipe when Quota is absent (e.g. Claude Code with MiniMax)
+	line := AssembleLine(data, "")
+	plain := StripANSI(line)
+	if strings.Contains(plain, "Gemini") || strings.Contains(plain, "Claude") {
+		t.Errorf("expected no Gemini or Claude quota in line without quota data, got: %s", plain)
+	}
+	if strings.HasSuffix(plain, "|") {
+		t.Errorf("expected no trailing pipe in line, got: %s", plain)
+	}
+}
+
+func TestFormatQuotaProviderFiltering(t *testing.T) {
+	// Only Gemini
+	dataGemini := &model.StatusLineData{
+		Quota: map[string]model.QuotaBucket{
+			"gemini-flash": {RemainingFraction: 0.85, ResetInSeconds: 7200},
+		},
+	}
+	plainGemini := StripANSI(FormatQuota(dataGemini))
+	if !strings.Contains(plainGemini, "Gemini: 85%(2h0m)") {
+		t.Errorf("expected Gemini quota, got %q", plainGemini)
+	}
+	if strings.Contains(plainGemini, "Claude") {
+		t.Errorf("expected no Claude when only Gemini data exists, got %q", plainGemini)
+	}
+
+	// Only Claude
+	dataClaude := &model.StatusLineData{
+		Quota: map[string]model.QuotaBucket{
+			"claude-3-7-sonnet": {RemainingFraction: 0.95, ResetInSeconds: 18000},
+		},
+	}
+	plainClaude := StripANSI(FormatQuota(dataClaude))
+	if !strings.Contains(plainClaude, "Claude: 95%(5h0m)") {
+		t.Errorf("expected Claude quota, got %q", plainClaude)
+	}
+	if strings.Contains(plainClaude, "Gemini") {
+		t.Errorf("expected no Gemini when only Claude data exists, got %q", plainClaude)
+	}
+
+	// Both Gemini and Claude
+	dataBoth := &model.StatusLineData{
+		Quota: map[string]model.QuotaBucket{
+			"gemini-flash":      {RemainingFraction: 0.85, ResetInSeconds: 7200},
+			"claude-3-7-sonnet": {RemainingFraction: 0.95, ResetInSeconds: 18000},
+		},
+	}
+	plainBoth := StripANSI(FormatQuota(dataBoth))
+	if !strings.Contains(plainBoth, "Gemini: 85%(2h0m)") || !strings.Contains(plainBoth, "Claude: 95%(5h0m)") || !strings.Contains(plainBoth, "|") {
+		t.Errorf("expected both Gemini and Claude separated by pipe, got %q", plainBoth)
+	}
+}
