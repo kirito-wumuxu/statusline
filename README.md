@@ -59,24 +59,24 @@
 
 | 平台与架构 | 文件名称 | 格式 |
 | :--- | :--- | :--- |
-| **Linux (x86_64 / amd64)** | `statusline_v0.1.0_linux_amd64.tar.gz` | `.tar.gz` |
-| **Linux (ARM64 / aarch64)** | `statusline_v0.1.0_linux_arm64.tar.gz` | `.tar.gz` |
-| **Windows (x86_64 / amd64)** | `statusline_v0.1.0_windows_amd64.zip` | `.zip` |
-| **macOS (Intel / amd64)** | `statusline_v0.1.0_darwin_amd64.tar.gz` | `.tar.gz` |
-| **macOS (Apple Silicon / M系列)** | `statusline_v0.1.0_darwin_arm64.tar.gz` | `.tar.gz` |
+| **Linux (x86_64 / amd64)** | `statusline_v0.1.2_linux_amd64.tar.gz` | `.tar.gz` |
+| **Linux (ARM64 / aarch64)** | `statusline_v0.1.2_linux_arm64.tar.gz` | `.tar.gz` |
+| **Windows (x86_64 / amd64)** | `statusline_v0.1.2_windows_amd64.zip` | `.zip` |
+| **macOS (Intel / amd64)** | `statusline_v0.1.2_darwin_amd64.tar.gz` | `.tar.gz` |
+| **macOS (Apple Silicon / M系列)** | `statusline_v0.1.2_darwin_arm64.tar.gz` | `.tar.gz` |
 
 ### Linux / macOS 一键解压与放置
 
 ```bash
 # 解压到本地 bin 目录 (以 Linux amd64 为例)
-tar -xzf statusline_v0.1.0_linux_amd64.tar.gz
+tar -xzf statusline_v0.1.2_linux_amd64.tar.gz
 chmod +x statusline statusline-server
 mv statusline statusline-server ~/.local/bin/
 ```
 
 ### Windows 安装
 
-解压 `statusline_v0.1.0_windows_amd64.zip` 后，将 `statusline.exe` 与 `statusline-server.exe` 放置于系统 `PATH` 包含的目录（如 `C:\Users\<用户名>\.local\bin`）即可。
+解压 `statusline_v0.1.2_windows_amd64.zip` 后，将 `statusline.exe` 与 `statusline-server.exe` 放置于系统 `PATH` 包含的目录（如 `C:\Users\<用户名>\.local\bin`）即可。
 
 ---
 
@@ -127,7 +127,7 @@ statusline init
   ```
   *(也可使用环境变量 `export CLAUDE_STATUSLINE_COMMAND="/absolute/path/to/statusline"`)*
 
-### 4. 环境变量与无服务器模式 (Pure Local)
+### 3. 环境变量与无服务器模式 (Pure Local)
 
 - **自定义服务端上报地址**：
   ```bash
@@ -138,7 +138,7 @@ statusline init
   export STATUSLINE_SERVER_URL="off"
   ```
 
-### 5. 客户端配置与模块化排序 (`client.yaml`)
+### 4. 客户端配置与模块化排序 (`client.yaml`)
 
 客户端配置默认自动从**二进制所在目录**下检索 `client.yaml`，亦支持当前工作目录 `./client.yaml` 或用户全局目录 `~/.config/statusline/client.yaml`（可通过环境变量 `STATUSLINE_CLIENT_CONFIG` 明确指定）：
 
@@ -281,7 +281,7 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/statusli
 ### 3. 一键打包全平台 Release
 
 ```bash
-./scripts/build-release.sh v0.1.0
+./scripts/build-release.sh v0.1.2
 ```
 该脚本将自动在 `dist/` 目录下生成各平台压缩包并输出 `checksums.txt`。
 
