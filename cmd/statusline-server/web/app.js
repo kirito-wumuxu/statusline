@@ -152,7 +152,139 @@ function renderDailyTokensTable(dailyTokens) {
   tbody.innerHTML = html;
 }
 
-// 3. 渲染按账号区分的模型配额池
+// 解析倒计时字符串为秒数 (例如 "2h10m" -> 7800, "5d18h" -> 496800)
+function parseCountdownToSeconds(str) {
+  if (!str || typeof str !== 'string') return 0;
+  let total = 0;
+  const days = str.match(/(\d+)\s*d/);
+  if (days) total += parseInt(days[1], 10) * 86400;
+  const hours = str.match(/(\d+)\s*h/);
+  if (hours) total += parseInt(hours[1], 10) * 3600;
+  const mins = str.match(/(\d+)\s*m/);
+  if (mins) total += parseInt(mins[1], 10) * 60;
+  const secs = str.match(/(\d+)\s*s/);
+  if (secs) total += parseInt(secs[1], 10);
+  return total;
+}
+
+// 渲染单个同心双环进度条 (外环: 额度余量, 内环: 倒计时进度)
+function renderConcentricRing(pct, resetCountdown, resetInSec, isShortWindow, windowLabel) {
+  const p = Math.max(0, Math.min(100, Math.round(pct != null ? pct : 100)));
+
+  // 外环颜色映射 (≥70% 绿色 #10b981, 30-69% 黄色 #f59e0b, <30% 红色 #ef4444)
+  let outerColor = '#10b981';
+  if (p < 30) {
+    outerColor = '#ef4444';
+  } else if (p < 70) {
+    outerColor = '#f59e0b';
+  }
+
+  // 外环几何参数: R=23, 周长 C = 2 * π * 23 ≈ 144.51
+  const outerCircumference = 144.51;
+  const outerOffset = (outerCircumference * (1 - p / 100)).toFixed(2);
+
+  // 内环颜色映射 (短期窗口 5h: 青色 #06b6d4, 周度窗口 7d: 紫色 #a855f7)
+  const innerColor = isShortWindow ? '#06b6d4' : '#a855f7';
+  const totalWindowSec = isShortWindow ? 18000 : 604800; // 5h=18000s, 7d=604800s
+
+  let remainSec = resetInSec;
+  if (!remainSec || remainSec <= 0) {
+    remainSec = parseCountdownToSeconds(resetCountdown);
+  }
+  const ratio = (totalWindowSec > 0 && remainSec > 0)
+    ? Math.max(0, Math.min(1, remainSec / totalWindowSec))
+    : 1;
+
+  // 内环几何参数: R=16.5, 周长 C = 2 * π * 16.5 ≈ 103.67
+  const innerCircumference = 103.67;
+  const innerOffset = (innerCircumference * (1 - ratio)).toFixed(2);
+
+  const countdownDisplay = resetCountdown ? escapeHtml(resetCountdown) : '--';
+  const tooltip = `${windowLabel} 窗口 | 额度余量: ${p}% | 倒计时: ${countdownDisplay}`;
+
+  return `
+    <div class="quota-ring-item" title="${tooltip}">
+      <div class="quota-ring-svg-wrap">
+        <svg width="56" height="56" viewBox="0 0 56 56" class="concentric-ring-svg">
+          <!-- 外环背景 -->
+          <circle cx="28" cy="28" r="23" fill="none" stroke="#21262d" stroke-width="3.0" />
+          <!-- 外环进度 (额度余量) -->
+          <circle cx="28" cy="28" r="23" fill="none" stroke="${outerColor}" stroke-width="3.0"
+            stroke-dasharray="${outerCircumference}" stroke-dashoffset="${outerOffset}"
+            stroke-linecap="round" transform="rotate(-90 28 28)" />
+          <!-- 内环背景 -->
+          <circle cx="28" cy="28" r="16.5" fill="none" stroke="#161b22" stroke-width="2.2" />
+          <!-- 内环进度 (倒计时进度) -->
+          <circle cx="28" cy="28" r="16.5" fill="none" stroke="${innerColor}" stroke-width="2.2"
+            stroke-dasharray="${innerCircumference}" stroke-dashoffset="${innerOffset}"
+            stroke-linecap="round" transform="rotate(-90 28 28)" />
+          <!-- 中心百分比数值 -->
+          <text x="28" y="32" text-anchor="middle" font-size="11" font-weight="700" fill="#f0f6fc">${p}%</text>
+        </svg>
+      </div>
+      <div class="quota-ring-caption">
+        <span class="caption-window">${escapeHtml(windowLabel)}</span>
+        <span class="caption-time" style="color: ${innerColor};">${countdownDisplay}</span>
+      </div>
+    </div>
+  `;
+}
+
+// 提取指定 Provider (Gemini / Claude) 的配额窗口列表
+function extractProviderWindows(acc, providerType) {
+  const windows = [];
+  const isMatchKey = (key) => {
+    const k = (key || '').toLowerCase();
+    if (providerType === 'gemini') {
+      return k.includes('gemini');
+    }
+    return k.includes('claude') || k.includes('sonnet') || k.includes('opus') || k.includes('3p');
+  };
+
+  if (acc.buckets && Array.isArray(acc.buckets) && acc.buckets.length > 0) {
+    const matched = acc.buckets.filter(b => isMatchKey(b.quota_key));
+    for (const b of matched) {
+      const isShort = b.reset_in_seconds <= 86400; // 1天以内视为短期窗口
+      const label = isShort ? '5h' : '7d';
+      windows.push({
+        label,
+        isShort,
+        pct: b.remaining_pct != null ? b.remaining_pct : Math.round(b.remaining_fraction * 100),
+        countdown: b.reset_countdown || '--',
+        resetInSec: b.reset_in_seconds || 0
+      });
+    }
+  }
+
+  // 若 buckets 未匹配到，从兼容字段 gemini / claude 中回退提取
+  if (windows.length === 0) {
+    const p = providerType === 'gemini' ? acc.gemini : acc.claude;
+    if (p) {
+      if (p.short_percentage != null || p.short_reset) {
+        windows.push({
+          label: '5h',
+          isShort: true,
+          pct: p.short_percentage != null ? p.short_percentage : 100,
+          countdown: p.short_reset || '--',
+          resetInSec: parseCountdownToSeconds(p.short_reset)
+        });
+      }
+      if (p.long_percentage != null || p.long_reset) {
+        windows.push({
+          label: '7d',
+          isShort: false,
+          pct: p.long_percentage != null ? p.long_percentage : 100,
+          countdown: p.long_reset || '--',
+          resetInSec: parseCountdownToSeconds(p.long_reset)
+        });
+      }
+    }
+  }
+
+  return windows;
+}
+
+// 3. 渲染按账号区分的模型配额池 (紧凑彩色同心双环仪表盘)
 function renderAccountQuotas(accountQuotas) {
   const container = document.getElementById('quotas-container');
   const tip = document.getElementById('quota-accounts-tip');
@@ -176,97 +308,58 @@ function renderAccountQuotas(accountQuotas) {
       updateTimeStr = isNaN(d.getTime()) ? acc.updated_at : d.toLocaleTimeString();
     }
 
-    let panelsHtml = '';
+    let groupsHtml = '';
 
-    // Gemini 配额卡片
-    if (acc.gemini) {
-      const g = acc.gemini;
-      const shortPct = g.short_percentage != null ? g.short_percentage : 100;
-      const longPct = g.long_percentage != null ? g.long_percentage : 100;
-      panelsHtml += `
-        <div class="quota-panel gemini-panel">
-          <div class="panel-header">
+    // Gemini Provider
+    const geminiWindows = extractProviderWindows(acc, 'gemini');
+    if (geminiWindows.length > 0) {
+      const rings = geminiWindows.map(w => renderConcentricRing(w.pct, w.countdown, w.resetInSec, w.isShort, w.label)).join('');
+      groupsHtml += `
+        <div class="quota-provider-group gemini-group">
+          <div class="provider-badge-row">
             <span class="provider-pill gemini-pill">Gemini</span>
-            <span class="provider-desc">Google AI 配额池</span>
           </div>
-          <div class="quota-row">
-            <div class="quota-meta">
-              <span class="window-name">短期窗口 (5小时)</span>
-              <span class="window-pct">${shortPct}%</span>
-            </div>
-            <div class="meter-bar">
-              <div class="meter-fill ${getFillClass(shortPct)}" style="width: ${Math.min(100, shortPct)}%;"></div>
-            </div>
-            <div class="reset-tip">重置倒计时: ${escapeHtml(g.short_reset || '--')}</div>
-          </div>
-          <div class="quota-row">
-            <div class="quota-meta">
-              <span class="window-name">周度窗口 (7天)</span>
-              <span class="window-pct">${longPct}%</span>
-            </div>
-            <div class="meter-bar">
-              <div class="meter-fill ${getFillClass(longPct)}" style="width: ${Math.min(100, longPct)}%;"></div>
-            </div>
-            <div class="reset-tip">重置倒计时: ${escapeHtml(g.long_reset || '--')}</div>
+          <div class="provider-rings-row">
+            ${rings}
           </div>
         </div>
       `;
     }
 
-    // Claude 配额卡片
-    if (acc.claude) {
-      const c = acc.claude;
-      const shortPct = c.short_percentage != null ? c.short_percentage : 100;
-      const longPct = c.long_percentage != null ? c.long_percentage : 100;
-      panelsHtml += `
-        <div class="quota-panel claude-panel">
-          <div class="panel-header">
+    // Claude Provider
+    const claudeWindows = extractProviderWindows(acc, 'claude');
+    if (claudeWindows.length > 0) {
+      const rings = claudeWindows.map(w => renderConcentricRing(w.pct, w.countdown, w.resetInSec, w.isShort, w.label)).join('');
+      groupsHtml += `
+        <div class="quota-provider-group claude-group">
+          <div class="provider-badge-row">
             <span class="provider-pill claude-pill">Claude</span>
-            <span class="provider-desc">Anthropic 配额池 (3p)</span>
           </div>
-          <div class="quota-row">
-            <div class="quota-meta">
-              <span class="window-name">短期窗口 (5小时)</span>
-              <span class="window-pct">${shortPct}%</span>
-            </div>
-            <div class="meter-bar">
-              <div class="meter-fill ${getFillClass(shortPct)}" style="width: ${Math.min(100, shortPct)}%;"></div>
-            </div>
-            <div class="reset-tip">重置倒计时: ${escapeHtml(c.short_reset || '--')}</div>
-          </div>
-          <div class="quota-row">
-            <div class="quota-meta">
-              <span class="window-name">周度窗口 (7天)</span>
-              <span class="window-pct">${longPct}%</span>
-            </div>
-            <div class="meter-bar">
-              <div class="meter-fill ${getFillClass(longPct)}" style="width: ${Math.min(100, longPct)}%;"></div>
-            </div>
-            <div class="reset-tip">重置倒计时: ${escapeHtml(c.long_reset || '--')}</div>
+          <div class="provider-rings-row">
+            ${rings}
           </div>
         </div>
       `;
     }
 
-    if (!panelsHtml) {
-      panelsHtml = '<div class="empty-placeholder" style="padding: 18px;">该账号暂无 Gemini / Claude 额度配额限制</div>';
+    if (!groupsHtml) {
+      groupsHtml = '<div class="empty-placeholder" style="padding: 10px 14px; font-size: 12px; margin: 0;">该账号暂无 Gemini / Claude 额度限制</div>';
     }
 
     html += `
-      <div class="account-quota-card">
-        <div class="account-card-header">
+      <div class="account-quota-card compact-card">
+        <div class="account-card-header compact-header">
           <div class="account-badge-email">
-            <span>👤</span>
-            <span>${escapeHtml(email)}</span>
+            <span class="user-avatar-icon">👤</span>
+            <span class="account-email-text">${escapeHtml(email)}</span>
           </div>
           <div class="account-node-meta">
-            <span>${escapeHtml(lastNode)}</span>
-            <span>·</span>
+            ${lastNode ? `<span>${escapeHtml(lastNode)}</span><span>·</span>` : ''}
             <span>更新于: ${escapeHtml(updateTimeStr)}</span>
           </div>
         </div>
-        <div class="quota-grid">
-          ${panelsHtml}
+        <div class="quota-providers-flex">
+          ${groupsHtml}
         </div>
       </div>
     `;
