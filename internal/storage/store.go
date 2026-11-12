@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -444,4 +446,244 @@ func (s *Store) GetRecentMetrics(limit int) ([]MetricPoint, error) {
 		})
 	}
 	return points, nil
+}
+
+// DailyModelToken records the consumption of a single model on a specific day.
+type DailyModelToken struct {
+	ModelID      string  `json:"model_id"`
+	DisplayName  string  `json:"display_name"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
+	TotalTokens  int64   `json:"total_tokens"`
+	Percentage   float64 `json:"percentage"`
+	CostUSD      float64 `json:"cost_usd"`
+}
+
+// DailyTokensSummary aggregates model token consumption for a single day.
+type DailyTokensSummary struct {
+	Date              string            `json:"date"`
+	TotalInputTokens  int64             `json:"total_input_tokens"`
+	TotalOutputTokens int64             `json:"total_output_tokens"`
+	TotalTokens       int64             `json:"total_tokens"`
+	TotalCostUSD      float64           `json:"total_cost_usd"`
+	Models            []DailyModelToken `json:"models"`
+}
+
+// GetDailyModelTokens returns daily token consumption grouped by date and model.
+func (s *Store) GetDailyModelTokens(days int) ([]DailyTokensSummary, error) {
+	if days <= 0 {
+		days = 14
+	}
+
+	query := `
+	WITH session_daily AS (
+		SELECT 
+			strftime('%Y-%m-%d', reported_at) AS day,
+			model_id,
+			COALESCE(model_display_name, model_id) AS display_name,
+			session_id,
+			MAX(total_input_tokens) AS max_in,
+			MAX(total_output_tokens) AS max_out,
+			MAX(total_cost_usd) AS max_cost
+		FROM telemetry_events
+		WHERE reported_at >= datetime('now', '-' || ? || ' days')
+		GROUP BY day, model_id, session_id
+	)
+	SELECT 
+		day,
+		model_id,
+		display_name,
+		COALESCE(SUM(max_in), 0) AS input_tokens,
+		COALESCE(SUM(max_out), 0) AS output_tokens,
+		COALESCE(SUM(max_in + max_out), 0) AS total_tokens,
+		COALESCE(SUM(max_cost), 0.0) AS cost_usd
+	FROM session_daily
+	GROUP BY day, model_id
+	ORDER BY day DESC, total_tokens DESC;`
+
+	rows, err := s.db.Query(query, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	dayMap := make(map[string]*DailyTokensSummary)
+	var dayOrder []string
+
+	for rows.Next() {
+		var day, modelID, displayName string
+		var inTokens, outTokens, totalTokens int64
+		var costUSD float64
+
+		if err := rows.Scan(&day, &modelID, &displayName, &inTokens, &outTokens, &totalTokens, &costUSD); err != nil {
+			return nil, err
+		}
+
+		summary, exists := dayMap[day]
+		if !exists {
+			summary = &DailyTokensSummary{
+				Date:   day,
+				Models: []DailyModelToken{},
+			}
+			dayMap[day] = summary
+			dayOrder = append(dayOrder, day)
+		}
+
+		summary.TotalInputTokens += inTokens
+		summary.TotalOutputTokens += outTokens
+		summary.TotalTokens += totalTokens
+		summary.TotalCostUSD += costUSD
+
+		summary.Models = append(summary.Models, DailyModelToken{
+			ModelID:      modelID,
+			DisplayName:  displayName,
+			InputTokens:  inTokens,
+			OutputTokens: outTokens,
+			TotalTokens:  totalTokens,
+			CostUSD:      costUSD,
+		})
+	}
+
+	var result []DailyTokensSummary
+	for _, day := range dayOrder {
+		sum := dayMap[day]
+		for i := range sum.Models {
+			if sum.TotalTokens > 0 {
+				sum.Models[i].Percentage = math.Round(float64(sum.Models[i].TotalTokens)/float64(sum.TotalTokens)*1000) / 10
+			}
+		}
+		result = append(result, *sum)
+	}
+
+	return result, nil
+}
+
+// RawReportItem stores the unmarshaled raw report payload for debugging.
+type RawReportItem struct {
+	ID          int64                  `json:"id"`
+	NodeID      string                 `json:"node_id"`
+	SessionID   string                 `json:"session_id"`
+	ProductType string                 `json:"product_type"`
+	ModelID     string                 `json:"model_id"`
+	ReportedAt  string                 `json:"reported_at"`
+	RawPayload  map[string]interface{} `json:"raw_payload"`
+}
+
+// GetRecentRawReports retrieves the most recent raw report events for debugging.
+func (s *Store) GetRecentRawReports(limit int) ([]RawReportItem, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	query := `
+	SELECT id, node_id, session_id, product_type, model_id, reported_at, raw_payload
+	FROM telemetry_events
+	ORDER BY id DESC
+	LIMIT ?`
+
+	rows, err := s.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []RawReportItem
+	for rows.Next() {
+		var item RawReportItem
+		var rawStr string
+		if err := rows.Scan(&item.ID, &item.NodeID, &item.SessionID, &item.ProductType, &item.ModelID, &item.ReportedAt, &rawStr); err != nil {
+			return nil, err
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(rawStr), &payload); err == nil {
+			item.RawPayload = payload
+		} else {
+			item.RawPayload = map[string]interface{}{"raw": rawStr}
+		}
+		list = append(list, item)
+	}
+	return list, nil
+}
+
+// AccountQuotaBucket represents one quota bucket under an account.
+type AccountQuotaBucket struct {
+	QuotaKey          string  `json:"quota_key"`
+	RemainingFraction float64 `json:"remaining_fraction"`
+	RemainingPct      int     `json:"remaining_pct"`
+	ResetTime         string  `json:"reset_time"`
+	ResetInSeconds    int64   `json:"reset_in_seconds"`
+	ResetCountdown    string  `json:"reset_countdown"`
+}
+
+// AccountQuotaGroup groups quota information under a specific account email.
+type AccountQuotaGroup struct {
+	AccountEmail string               `json:"account_email"`
+	LastNodeID   string               `json:"last_node_id"`
+	UpdatedAt    string               `json:"updated_at"`
+	Gemini       *model.ProviderQuota `json:"gemini,omitempty"`
+	Claude       *model.ProviderQuota `json:"claude,omitempty"`
+	Buckets      []AccountQuotaBucket `json:"buckets"`
+}
+
+// GetGroupedAccountQuotas retrieves quotas grouped by account email.
+func (s *Store) GetGroupedAccountQuotas() ([]AccountQuotaGroup, error) {
+	records, err := s.GetAccountQuotas()
+	if err != nil {
+		return nil, err
+	}
+
+	groupMap := make(map[string]*AccountQuotaGroup)
+	var order []string
+
+	for _, r := range records {
+		grp, exists := groupMap[r.AccountEmail]
+		if !exists {
+			grp = &AccountQuotaGroup{
+				AccountEmail: r.AccountEmail,
+				LastNodeID:   r.LastNodeID,
+				UpdatedAt:    r.UpdatedAt,
+				Buckets:      []AccountQuotaBucket{},
+			}
+			groupMap[r.AccountEmail] = grp
+			order = append(order, r.AccountEmail)
+		}
+
+		pct := int(math.Round(r.RemainingFraction * 100))
+		dur := model.FormatDurationCompact(r.ResetInSeconds)
+
+		grp.Buckets = append(grp.Buckets, AccountQuotaBucket{
+			QuotaKey:          r.QuotaKey,
+			RemainingFraction: r.RemainingFraction,
+			RemainingPct:      pct,
+			ResetTime:         r.ResetTime,
+			ResetInSeconds:    r.ResetInSeconds,
+			ResetCountdown:    dur,
+		})
+
+		lower := strings.ToLower(r.QuotaKey)
+		if strings.Contains(lower, "gemini") {
+			if grp.Gemini == nil {
+				grp.Gemini = &model.ProviderQuota{ShortPercentage: pct, ShortReset: dur}
+			} else {
+				grp.Gemini.LongPercentage = pct
+				grp.Gemini.LongReset = dur
+			}
+		} else if strings.Contains(lower, "claude") || strings.Contains(lower, "sonnet") || strings.Contains(lower, "opus") || strings.Contains(lower, "3p") {
+			if grp.Claude == nil {
+				grp.Claude = &model.ProviderQuota{ShortPercentage: pct, ShortReset: dur}
+			} else {
+				grp.Claude.LongPercentage = pct
+				grp.Claude.LongReset = dur
+			}
+		}
+	}
+
+	var result []AccountQuotaGroup
+	for _, email := range order {
+		result = append(result, *groupMap[email])
+	}
+	return result, nil
 }

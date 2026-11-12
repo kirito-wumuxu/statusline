@@ -70,7 +70,7 @@
 │   │   └── store.go                # 事务化 UPSERT 与查询
 │   └── server/                     # 服务端 HTTP 路由与控制器
 │       ├── handlers_report.go      # POST /api/v1/report
-│       ├── handlers_api.go         # GET /api/v1/sessions, overview, quotas
+│       ├── handlers_api.go         # GET /api/v1/sessions, overview, quotas, tokens/daily, debug/raw
 │       └── refresher.go            # 终端空闲重绘调度
 ├── test/
 │   └── e2e/                        # 端到端全链路集成测试

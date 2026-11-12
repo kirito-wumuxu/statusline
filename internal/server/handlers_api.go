@@ -153,6 +153,8 @@ func (s *Server) handleGetOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metrics, _ := s.store.GetRecentMetrics(50)
+	groupedQuotas, _ := s.store.GetGroupedAccountQuotas()
+	dailyTokens, _ := s.store.GetDailyModelTokens(7)
 
 	res := map[string]interface{}{
 		"active_sessions":          ov.ActiveSessions,
@@ -168,6 +170,8 @@ func (s *Server) handleGetOverview(w http.ResponseWriter, r *http.Request) {
 		"model_breakdown":          modelBreakdown,
 		"latest_account":           latestAccount,
 		"latest_quota":             quotaSummary,
+		"account_quotas":           groupedQuotas,
+		"daily_tokens":             dailyTokens,
 		"metrics":                  metrics,
 		"refresh_interval_seconds": 60,
 	}
@@ -196,13 +200,49 @@ func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetQuotas(w http.ResponseWriter, r *http.Request) {
-	quotas, err := s.store.GetAccountQuotas()
+	quotas, err := s.store.GetGroupedAccountQuotas()
 	if err != nil {
 		http.Error(w, `{"error":"failed to get quotas"}`, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(quotas)
+}
+
+func (s *Server) handleGetDailyTokens(w http.ResponseWriter, r *http.Request) {
+	daysStr := r.URL.Query().Get("days")
+	days := 14
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 {
+			days = d
+		}
+	}
+
+	dailyTokens, err := s.store.GetDailyModelTokens(days)
+	if err != nil {
+		http.Error(w, `{"error":"failed to get daily tokens"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(dailyTokens)
+}
+
+func (s *Server) handleGetDebugRaw(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 5
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	rawReports, err := s.store.GetRecentRawReports(limit)
+	if err != nil {
+		http.Error(w, `{"error":"failed to get raw reports"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(rawReports)
 }
 
 

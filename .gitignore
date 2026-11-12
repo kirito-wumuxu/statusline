@@ -1,9 +1,9 @@
 # Binaries for programs and plugins
 bin/
 dist/
-statusline
-statusline-server
-statusline-*
+/statusline
+/statusline-server
+/statusline-*
 *.exe
 *.exe~
 *.dll

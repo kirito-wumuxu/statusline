@@ -82,6 +82,29 @@ func TestHandlersReportAndQuery(t *testing.T) {
 	if wHist.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK from history, got %d", wHist.Code)
 	}
+
+	// 6. Test GET /api/v1/tokens/daily
+	reqDaily := httptest.NewRequest(http.MethodGet, "/api/v1/tokens/daily", nil)
+	wDaily := httptest.NewRecorder()
+	srv.Router().ServeHTTP(wDaily, reqDaily)
+	if wDaily.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from tokens/daily, got %d", wDaily.Code)
+	}
+
+	// 7. Test GET /api/v1/debug/raw
+	reqDebug := httptest.NewRequest(http.MethodGet, "/api/v1/debug/raw?limit=5", nil)
+	wDebug := httptest.NewRecorder()
+	srv.Router().ServeHTTP(wDebug, reqDebug)
+	if wDebug.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from debug/raw, got %d", wDebug.Code)
+	}
+	var debugReports []map[string]interface{}
+	if err := json.Unmarshal(wDebug.Body.Bytes(), &debugReports); err != nil {
+		t.Fatalf("failed to unmarshal debug raw reports: %v", err)
+	}
+	if len(debugReports) == 0 {
+		t.Fatalf("expected at least 1 raw report event in debug API, got 0")
+	}
 }
 
 func TestHandlerReportEnvelope(t *testing.T) {

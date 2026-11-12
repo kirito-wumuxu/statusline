@@ -16,15 +16,13 @@
         <span class="live-dot" title="实时连接中"></span>
       </div>
       <div class="header-meta">
-        <div id="header-account" class="header-account-tag" style="display: none;">
-          <span class="user-icon">👤</span>
-          <span id="header-account-email" class="email"></span>
-          <span id="header-account-tier" class="tier-pill"></span>
-        </div>
+        <button id="btn-toggle-debug" class="btn-action btn-debug" title="查看最近5次客户端上报原始数据">
+          <span>🔍</span> 调试原始上报 (5)
+        </button>
+        <button id="btn-manual-refresh" class="btn-action btn-refresh" title="立即刷新数据">
+          <span>⟳</span> 立即刷新
+        </button>
         <div class="header-status">
-          <span id="auto-refresh-tag" class="refresh-tag">自动刷新: 60s</span>
-          <button id="btn-manual-refresh" class="btn-refresh" title="立即向所有活跃终端发送刷新信号">立即刷新</button>
-          <span class="separator">·</span>
           <span id="connection-status" class="status-text">已连接</span>
           <span class="separator">·</span>
           <span id="last-updated" class="time-text">--:--:--</span>
@@ -35,125 +33,111 @@
     <!-- 核心指标概览 -->
     <section class="overview-grid">
       <div class="stat-card">
-        <div class="stat-label">活跃会话</div>
+        <div class="stat-label">活跃终端会话</div>
         <div class="stat-number" id="val-sessions">0</div>
         <div class="stat-sub" id="val-sources">0 agy · 0 claude</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">累计消耗 Token</div>
-        <div class="stat-number" id="val-tokens">0</div>
-        <div class="stat-sub" id="val-tokens-detail">输入 ↑0 · 输出 ↓0</div>
+        <div class="stat-label">今日消耗 Token</div>
+        <div class="stat-number stat-highlight" id="val-tokens-today">0</div>
+        <div class="stat-sub" id="val-tokens-today-detail">输入 ↑0 · 输出 ↓0</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">当前账号 & 计划</div>
-        <div class="stat-number stat-account" id="val-account-email">未绑定</div>
-        <div class="stat-sub" id="val-account-tier">暂无订阅信息</div>
+        <div class="stat-label">历史累计 Token</div>
+        <div class="stat-number" id="val-tokens-total">0</div>
+        <div class="stat-sub" id="val-cost-total">累计估算: $0.00</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">使用中模型</div>
-        <div class="stat-number stat-model" id="val-active-model">-</div>
-        <div class="stat-sub" id="val-model-count">0 种运行模型</div>
+        <div class="stat-label">关联物理节点</div>
+        <div class="stat-number stat-nodes" id="val-nodes">0</div>
+        <div class="stat-sub" id="val-nodes-sub">多机采集拓扑</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">实时消耗速率</div>
-        <div class="stat-number stat-rate" id="val-token-rate">0 / min</div>
-        <div class="stat-sub" id="val-token-rate-sub">近 5 分钟吞吐量</div>
+        <div class="stat-label">活跃登录账号</div>
+        <div class="stat-number stat-account" id="val-accounts">0</div>
+        <div class="stat-sub" id="val-accounts-sub">已上报授权账号</div>
       </div>
     </section>
 
-    <!-- Token 消耗趋势折线图 -->
-    <section class="dashboard-section chart-section">
-      <div class="section-title-bar">
-        <h2>Token 消耗历史趋势</h2>
-        <span class="section-hint" id="chart-subtext">实时时间序列变化曲线</span>
-      </div>
-      <div class="chart-card">
-        <div class="chart-svg-container" id="chart-container">
-          <svg id="trend-svg" viewBox="0 0 800 160" preserveAspectRatio="none">
-            <!-- 动态渲染 -->
-          </svg>
-        </div>
-        <div class="chart-axis-labels">
-          <span id="chart-start-time">--:--</span>
-          <span id="chart-mid-tokens">累计 Token 曲线</span>
-          <span id="chart-end-time">现在</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- 模型配额监控区 -->
+    <!-- 每日各模型 Token 消耗表格 -->
     <section class="dashboard-section">
       <div class="section-title-bar">
-        <h2>模型配额余量</h2>
-        <span class="section-hint">实时额度百分比及周期重置倒计时</span>
-      </div>
-      <div class="quota-grid">
-        <!-- Gemini 配额卡片 -->
-        <div class="quota-panel gemini-panel">
-          <div class="panel-header">
-            <span class="provider-pill gemini-pill">Gemini</span>
-            <span class="provider-desc">Google AI 服务配额</span>
-          </div>
-          <div class="quota-row">
-            <div class="quota-meta">
-              <span class="window-name">短期窗口 (5小时)</span>
-              <span id="gemini-short-label" class="window-pct">100%</span>
-            </div>
-            <div class="meter-bar">
-              <div id="gemini-short-bar" class="meter-fill fill-green" style="width: 100%;"></div>
-            </div>
-            <div class="reset-tip" id="gemini-short-time">重置倒计时: --</div>
-          </div>
-          <div class="quota-row">
-            <div class="quota-meta">
-              <span class="window-name">长期窗口 (周度)</span>
-              <span id="gemini-long-label" class="window-pct">100%</span>
-            </div>
-            <div class="meter-bar">
-              <div id="gemini-long-bar" class="meter-fill fill-green" style="width: 100%;"></div>
-            </div>
-            <div class="reset-tip" id="gemini-long-time">重置倒计时: --</div>
-          </div>
+        <div>
+          <h2>每日各模型 Token 消耗</h2>
+          <span class="section-hint">按日期汇总各模型输入 / 输出 Token 吞吐与占比明细</span>
         </div>
-
-        <!-- Claude 配额卡片 -->
-        <div class="quota-panel claude-panel">
-          <div class="panel-header">
-            <span class="provider-pill claude-pill">Claude</span>
-            <span class="provider-desc">Anthropic 模型配额 (3p)</span>
-          </div>
-          <div class="quota-row">
-            <div class="quota-meta">
-              <span class="window-name">短期窗口 (5小时)</span>
-              <span id="claude-short-label" class="window-pct">100%</span>
-            </div>
-            <div class="meter-bar">
-              <div id="claude-short-bar" class="meter-fill fill-green" style="width: 100%;"></div>
-            </div>
-            <div class="reset-tip" id="claude-short-time">重置倒计时: --</div>
-          </div>
-          <div class="quota-row">
-            <div class="quota-meta">
-              <span class="window-name">长期窗口 (周度)</span>
-              <span id="claude-long-label" class="window-pct">100%</span>
-            </div>
-            <div class="meter-bar">
-              <div id="claude-long-bar" class="meter-fill fill-green" style="width: 100%;"></div>
-            </div>
-            <div class="reset-tip" id="claude-long-time">重置倒计时: --</div>
-          </div>
+        <div class="date-filter-group" id="date-tabs">
+          <!-- 动态渲染日期切换 Tab -->
+        </div>
+      </div>
+      <div class="table-card">
+        <div class="table-responsive">
+          <table class="data-table" id="daily-tokens-table">
+            <thead>
+              <tr>
+                <th style="width: 130px;">日期</th>
+                <th style="width: 220px;">模型名称</th>
+                <th style="width: 120px;">输入 Token (↑)</th>
+                <th style="width: 120px;">输出 Token (↓)</th>
+                <th style="width: 130px;">总计 Token</th>
+                <th>消耗占比</th>
+                <th style="width: 100px; text-align: right;">估算费用</th>
+              </tr>
+            </thead>
+            <tbody id="daily-tokens-tbody">
+              <tr>
+                <td colspan="7" class="table-empty">数据加载中...</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </section>
 
-    <!-- 实时终端会话 -->
+    <!-- 账号模型配额监控池 (按账号独立卡片分组展示) -->
     <section class="dashboard-section">
       <div class="section-title-bar">
-        <h2>活跃终端会话</h2>
-        <span class="section-hint" id="session-count-tip">检测到 0 个活跃会话</span>
+        <div>
+          <h2>账号模型配额池</h2>
+          <span class="section-hint">按账号聚合展示 Gemini 与 Claude 配额余量及周期重置倒计时</span>
+        </div>
+        <span class="quota-accounts-count" id="quota-accounts-tip">0 个配额账号</span>
+      </div>
+      <div id="quotas-container" class="account-quotas-list">
+        <div class="empty-placeholder">暂未检测到配额信息，Antigravity 会话产生交互后将自动同步...</div>
+      </div>
+    </section>
+
+    <!-- 活跃终端会话列表 (支持节点筛选 & 按更新时间倒序) -->
+    <section class="dashboard-section">
+      <div class="section-title-bar">
+        <div>
+          <h2>活跃终端会话</h2>
+          <span class="section-hint">按更新时间倒序排列，支持按物理节点快速过滤</span>
+        </div>
+        <div class="node-filter-container">
+          <label for="node-filter-select" class="filter-label">节点筛选:</label>
+          <select id="node-filter-select" class="filter-select">
+            <option value="">全部节点 (All Nodes)</option>
+          </select>
+        </div>
       </div>
       <div id="sessions-container" class="session-cards-list">
-        <div class="empty-placeholder">暂未接收到任何会话遥测数据，请在终端中启动 agy 会话...</div>
+        <div class="empty-placeholder">暂未接收到任何会话遥测数据，请在终端中启动会话...</div>
+      </div>
+    </section>
+
+    <!-- 调试信息抽屉 / 模态卡片 (最近5次上报原始数据) -->
+    <section class="dashboard-section debug-section" id="debug-drawer" style="display: none;">
+      <div class="section-title-bar debug-title-bar">
+        <div>
+          <h2>最近 5 次客户端上报原始数据 (Debug)</h2>
+          <span class="section-hint">实时展示终端插件 POST 上报的原始 JSON 信封</span>
+        </div>
+        <button id="btn-close-debug" class="btn-action btn-sm">关闭面板</button>
+      </div>
+      <div id="debug-container" class="debug-cards-list">
+        <div class="empty-placeholder">加载最近原始上报中...</div>
       </div>
     </section>
   </div>

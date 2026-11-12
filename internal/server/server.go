@@ -53,6 +53,12 @@ func (s *Server) routes() {
 	s.router.HandleFunc("GET /api/v1/quotas", s.handleGetQuotas)
 	s.router.HandleFunc("GET /api/quotas", s.handleGetQuotas)
 
+	s.router.HandleFunc("GET /api/v1/tokens/daily", s.handleGetDailyTokens)
+	s.router.HandleFunc("GET /api/tokens/daily", s.handleGetDailyTokens)
+
+	s.router.HandleFunc("GET /api/v1/debug/raw", s.handleGetDebugRaw)
+	s.router.HandleFunc("GET /api/debug/raw", s.handleGetDebugRaw)
+
 	// Embedded Web Dashboard
 	if s.webFS != nil {
 		s.router.Handle("/", http.FileServer(http.FS(s.webFS)))

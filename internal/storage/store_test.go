@@ -98,6 +98,45 @@ func TestStorageLifecycleAndIngest(t *testing.T) {
 	if overview.TotalInputTokens != 2500 {
 		t.Errorf("expected 2500 total input tokens, got %d", overview.TotalInputTokens)
 	}
+
+	// Query daily model tokens
+	dailyTokens, err := store.GetDailyModelTokens(7)
+	if err != nil {
+		t.Fatalf("failed to get daily tokens: %v", err)
+	}
+	if len(dailyTokens) == 0 {
+		t.Fatalf("expected daily tokens for today, got 0")
+	}
+	if dailyTokens[0].TotalInputTokens != 2500 {
+		t.Errorf("expected 2500 input tokens today, got %d", dailyTokens[0].TotalInputTokens)
+	}
+	if len(dailyTokens[0].Models) != 1 || dailyTokens[0].Models[0].ModelID != "gemini-3.8-flash" {
+		t.Errorf("expected gemini-3.8-flash model summary, got %+v", dailyTokens[0].Models)
+	}
+
+	// Query recent raw reports
+	rawReports, err := store.GetRecentRawReports(5)
+	if err != nil {
+		t.Fatalf("failed to get raw reports: %v", err)
+	}
+	if len(rawReports) != 2 {
+		t.Fatalf("expected 2 raw reports, got %d", len(rawReports))
+	}
+	if rawReports[0].RawPayload["product"] != "antigravity" {
+		t.Errorf("expected product antigravity in raw payload, got %v", rawReports[0].RawPayload["product"])
+	}
+
+	// Query grouped account quotas
+	groupedQuotas, err := store.GetGroupedAccountQuotas()
+	if err != nil {
+		t.Fatalf("failed to get grouped account quotas: %v", err)
+	}
+	if len(groupedQuotas) != 1 || groupedQuotas[0].AccountEmail != "dev@example.com" {
+		t.Fatalf("expected 1 grouped quota for dev@example.com, got %+v", groupedQuotas)
+	}
+	if groupedQuotas[0].Gemini == nil {
+		t.Errorf("expected Gemini quota present in group")
+	}
 }
 
 func TestConcurrentWrites(t *testing.T) {
