@@ -80,6 +80,42 @@ func TestConfigureClaudeCodeSettings(t *testing.T) {
 	}
 }
 
+func TestConfigureClaudeCodeWindowsBackslashConversion(t *testing.T) {
+	tmpDir := t.TempDir()
+	claudePath := filepath.Join(tmpDir, ".claude", "settings.json")
+	binPathWindows := `D:\Software\Statusline\statusline.exe`
+
+	var out bytes.Buffer
+	err := RunInit([]string{"-settings", claudePath, "-bin", binPathWindows}, &out)
+	if err != nil {
+		t.Fatalf("RunInit failed: %v", err)
+	}
+
+	data, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("failed to read created claude settings: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	statusLine, ok := parsed["statusLine"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected statusLine object in JSON")
+	}
+
+	expected := "D:/Software/Statusline/statusline.exe"
+	if statusLine["command"] != expected {
+		t.Errorf("expected command %s, got %v", expected, statusLine["command"])
+	}
+
+	if !strings.Contains(out.String(), expected) {
+		t.Errorf("expected output log to display %s, got: %s", expected, out.String())
+	}
+}
+
 func TestConfigureExistingSettingsPreservesFields(t *testing.T) {
 	tmpDir := t.TempDir()
 	settingsPath := filepath.Join(tmpDir, "settings.json")

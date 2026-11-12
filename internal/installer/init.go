@@ -58,7 +58,11 @@ func RunInit(args []string, out io.Writer) error {
 	// If a custom settings path is provided, configure it directly
 	if opts.SettingsPath != "" {
 		isClaude := strings.Contains(strings.ToLower(opts.SettingsPath), "claude")
-		if err := configureSettingsFile(opts.SettingsPath, targetBin, isClaude); err != nil {
+		cmdBin := targetBin
+		if isClaude {
+			cmdBin = strings.ReplaceAll(targetBin, "\\", "/")
+		}
+		if err := configureSettingsFile(opts.SettingsPath, cmdBin, isClaude); err != nil {
 			return fmt.Errorf("failed to configure %s: %w", opts.SettingsPath, err)
 		}
 		label := "Antigravity"
@@ -66,7 +70,7 @@ func RunInit(args []string, out io.Writer) error {
 			label = "Claude Code"
 		}
 		fmt.Fprintf(out, "✔ Configured %s settings: %s\n", label, opts.SettingsPath)
-		fmt.Fprintf(out, "  - statusLine.command: %s\n", targetBin)
+		fmt.Fprintf(out, "  - statusLine.command: %s\n", cmdBin)
 		fmt.Fprintln(out, "🎉 Statusline initialized successfully!")
 		return nil
 	}
@@ -97,13 +101,14 @@ func RunInit(args []string, out io.Writer) error {
 
 	// 3. Configure Claude Code if target is "all" or "claude"
 	if target == "all" || target == "claude" || target == "claudecode" {
+		claudeBin := strings.ReplaceAll(targetBin, "\\", "/")
 		claudePath := filepath.Join(homeDir, ".claude", "settings.json")
-		if err := configureSettingsFile(claudePath, targetBin, true); err != nil {
+		if err := configureSettingsFile(claudePath, claudeBin, true); err != nil {
 			return fmt.Errorf("failed to configure Claude Code settings %s: %w", claudePath, err)
 		}
 		fmt.Fprintf(out, "✔ Configured Claude Code settings: %s\n", claudePath)
 		fmt.Fprintf(out, "  - statusLine.type: command\n")
-		fmt.Fprintf(out, "  - statusLine.command: %s\n", targetBin)
+		fmt.Fprintf(out, "  - statusLine.command: %s\n", claudeBin)
 		configuredCount++
 
 		// Check if current workspace has a local .claude directory
@@ -111,7 +116,7 @@ func RunInit(args []string, out io.Writer) error {
 		localClaudeDir := filepath.Join(cwd, ".claude")
 		if fi, err := os.Stat(localClaudeDir); err == nil && fi.IsDir() {
 			localClaudePath := filepath.Join(localClaudeDir, "settings.json")
-			if err := configureSettingsFile(localClaudePath, targetBin, true); err == nil {
+			if err := configureSettingsFile(localClaudePath, claudeBin, true); err == nil {
 				fmt.Fprintf(out, "✔ Configured local workspace Claude Code settings: %s\n", localClaudePath)
 			}
 		}
@@ -146,8 +151,13 @@ func configureSettingsFile(filePath, binPath string, isClaude bool) error {
 		statusLine = make(map[string]any)
 	}
 
+	cmd := binPath
+	if isClaude {
+		cmd = strings.ReplaceAll(binPath, "\\", "/")
+	}
+
 	statusLine["type"] = "command"
-	statusLine["command"] = binPath
+	statusLine["command"] = cmd
 	if !isClaude {
 		statusLine["enabled"] = true
 	}
