@@ -2,10 +2,33 @@
 let selectedNodeId = '';
 let isDebugOpen = false;
 let knownNodes = [];
+const expandedSessionIds = new Set();
+const rawReportsCache = new Map();
+let lastRenderCache = { daily: '', quotas: '', sessions: '' };
+let refreshTimer = null;
 
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+// 联动顶部连接指示器与文字状态
+function setConnectionState(isConnected, statusText) {
+  const indicator = document.getElementById('live-indicator');
+  const statusEl = document.getElementById('connection-status');
+  if (indicator) {
+    if (isConnected) {
+      indicator.classList.remove('error');
+      indicator.title = '实时连接中';
+    } else {
+      indicator.classList.add('error');
+      indicator.title = '连接异常或中断';
+    }
+  }
+  if (statusEl) {
+    statusEl.textContent = statusText;
+    statusEl.style.color = isConnected ? 'var(--accent-emerald)' : 'var(--accent-rose)';
+  }
 }
 
 // Automatically compute base URL for API calls so it works both at root (/)
@@ -35,19 +58,14 @@ function formatUSD(n) {
   return '$' + n.toFixed(2);
 }
 
-function getFillClass(pct) {
-  if (pct >= 30) return 'fill-green';
-  if (pct >= 10) return 'fill-yellow';
-  return 'fill-red';
-}
-
 function escapeHtml(str) {
   if (!str) return '';
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function formatRelativeTime(tsSeconds) {
@@ -62,6 +80,27 @@ function formatRelativeTime(tsSeconds) {
   return new Date(tsSeconds * 1000).toLocaleDateString();
 }
 
+// JSON 语法高亮渲染器
+function syntaxHighlightJSON(rawObj) {
+  let jsonStr = typeof rawObj === 'string' ? rawObj : JSON.stringify(rawObj, null, 2);
+  let safeJson = escapeHtml(jsonStr);
+  return safeJson.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+    let cls = 'json-number';
+    if (/^"/.test(match)) {
+      if (/:$/.test(match)) {
+        cls = 'json-key';
+      } else {
+        cls = 'json-string';
+      }
+    } else if (/true|false/.test(match)) {
+      cls = 'json-boolean';
+    } else if (/null/.test(match)) {
+      cls = 'json-null';
+    }
+    return '<span class="' + cls + '">' + match + '</span>';
+  });
+}
+
 // 1. 初始化并更新节点下拉筛选器
 async function loadNodes() {
   try {
@@ -73,7 +112,7 @@ async function loadNodes() {
     const select = document.getElementById('node-filter-select');
     if (!select) return;
 
-    const currentVal = select.value;
+    const currentVal = select.value || selectedNodeId;
     let html = '<option value="">全部节点 (All Nodes)</option>';
     for (const n of knownNodes) {
       const hostLabel = n.hostname ? ` (${escapeHtml(n.hostname)})` : '';
@@ -87,10 +126,16 @@ async function loadNodes() {
   }
 }
 
-// 2. 渲染每日各模型 Token 表格
-function renderDailyTokensTable(dailyTokens) {
+// 2. 渲染每日各模型 Token 表格 (带数据无变化跳过 & 明细行日期去重)
+function renderDailyTokensTable(dailyTokens, forceRedraw = false) {
   const tbody = document.getElementById('daily-tokens-tbody');
   if (!tbody) return;
+
+  const cacheKey = JSON.stringify(dailyTokens || []);
+  if (!forceRedraw && lastRenderCache.daily === cacheKey) {
+    return; // 数据无变化，跳过 DOM 重绘
+  }
+  lastRenderCache.daily = cacheKey;
 
   if (!dailyTokens || dailyTokens.length === 0) {
     tbody.innerHTML = '<tr><td colspan="7" class="table-empty">暂无每日 Token 统计数据，终端产生对话后自动展示</td></tr>';
@@ -115,22 +160,25 @@ function renderDailyTokensTable(dailyTokens) {
         <td><span class="token-in">↑${dayTotalIn}</span></td>
         <td><span class="token-out">↓${dayTotalOut}</span></td>
         <td><span class="token-total">${dayTotal}</span></td>
-        <td><span class="pct-text" style="width:auto;">当天总计</span></td>
+        <td><span class="pct-text" style="width:auto; font-weight: 600;">当天总计</span></td>
         <td class="cost-text"><strong>${dayCost}</strong></td>
       </tr>
     `;
 
-    // 模型明细行
-    for (const m of day.models || []) {
+    // 模型明细行 (去重重复日期，以树状符号展现)
+    const models = day.models || [];
+    for (let i = 0; i < models.length; i++) {
+      const m = models[i];
       const pct = m.percentage || 0;
       const mIn = formatTokens(m.input_tokens);
       const mOut = formatTokens(m.output_tokens);
       const mTot = formatTokens(m.total_tokens);
       const mCost = formatUSD(m.cost_usd);
+      const subPrefix = i === 0 ? '↳ 明细' : '↳';
 
       html += `
         <tr>
-          <td style="color: var(--text-muted); font-family: monospace;">${escapeHtml(day.date)}</td>
+          <td class="sub-row-cell">${subPrefix}</td>
           <td><span class="model-tag">${escapeHtml(m.display_name || m.model_id)}</span></td>
           <td><span class="token-in">↑${mIn}</span></td>
           <td><span class="token-out">↓${mOut}</span></td>
@@ -284,11 +332,17 @@ function extractProviderWindows(acc, providerType) {
   return windows;
 }
 
-// 3. 渲染按账号区分的模型配额池 (紧凑彩色同心双环仪表盘)
-function renderAccountQuotas(accountQuotas) {
+// 3. 渲染按账号区分的模型配额池 (紧凑彩色同心双环仪表盘，带防重绘闪烁)
+function renderAccountQuotas(accountQuotas, forceRedraw = false) {
   const container = document.getElementById('quotas-container');
   const tip = document.getElementById('quota-accounts-tip');
   if (!container) return;
+
+  const cacheKey = JSON.stringify(accountQuotas || []);
+  if (!forceRedraw && lastRenderCache.quotas === cacheKey) {
+    return; // 数据无变化，跳过 DOM 重绘以保持 hover 与动画
+  }
+  lastRenderCache.quotas = cacheKey;
 
   if (!accountQuotas || accountQuotas.length === 0) {
     container.innerHTML = '<div class="empty-placeholder">暂未检测到配额信息，Antigravity 账号产生会话后将在此按账号独立呈现配额池...</div>';
@@ -368,10 +422,17 @@ function renderAccountQuotas(accountQuotas) {
   container.innerHTML = html;
 }
 
-// 4. 渲染终端会话列表 (已按更新时间倒序)
-function renderSessions(sessions) {
+// 4. 渲染终端会话列表 (支持点击卡片展开详情，防重绘闪烁)
+function renderSessions(sessions, forceRedraw = false) {
   const container = document.getElementById('sessions-container');
   if (!container) return;
+
+  const stateToken = Array.from(expandedSessionIds).sort().join(',');
+  const cacheKey = JSON.stringify(sessions || []) + '|' + stateToken;
+  if (!forceRedraw && lastRenderCache.sessions === cacheKey) {
+    return; // 无数据或展开状态变化，跳过重绘
+  }
+  lastRenderCache.sessions = cacheKey;
 
   if (!sessions || sessions.length === 0) {
     const filterTip = selectedNodeId ? `节点 [${escapeHtml(selectedNodeId)}] 下暂无活跃会话` : '暂未接收到任何会话遥测数据';
@@ -391,19 +452,24 @@ function renderSessions(sessions) {
     const nodeBadge = sess.node_id ? `<span class="node-badge">🖥️ ${escapeHtml(sess.node_id)}</span>` : '';
     const updatedRelative = formatRelativeTime(sess.timestamp);
     const updatedClock = sess.timestamp ? new Date(sess.timestamp * 1000).toLocaleTimeString() : '--:--';
+    const updatedFull = sess.timestamp ? new Date(sess.timestamp * 1000).toLocaleString() : '--';
 
     const inTokens = formatTokens(sess.tokens ? sess.tokens.total_input_tokens : 0);
     const outTokens = formatTokens(sess.tokens ? sess.tokens.total_output_tokens : 0);
     const modelName = sess.model ? (sess.model.display_name || sess.model.id) : 'Gemini';
     const title = sess.conversation_title || sess.session_name || '默认终端会话';
     const email = (sess.account && sess.account.email) ? sess.account.email : '';
+    const planTier = (sess.account && sess.account.plan_tier) ? sess.account.plan_tier : '';
     const accountBadge = email ? `<span class="account-badge">👤 ${escapeHtml(email)}</span>` : '';
     const ctxPct = sess.context_window ? Math.round(sess.context_window.used_percentage) : 0;
     const ctxSize = sess.context_window && sess.context_window.context_window_size ? formatTokens(sess.context_window.context_window_size) : '1M';
     const cost = formatUSD(sess.cost_usd);
 
+    const isExpanded = expandedSessionIds.has(sess.session_id);
+    const boxClass = isExpanded ? 'session-box expanded' : 'session-box';
+
     html += `
-      <div class="session-box">
+      <div class="${boxClass}" data-session-id="${escapeHtml(sess.session_id)}">
         <div class="session-top">
           <div class="session-tags">
             <span class="tag-badge ${sourceClass}">${escapeHtml(sourceName)}</span>
@@ -411,10 +477,13 @@ function renderSessions(sessions) {
             ${nodeBadge}
             ${accountBadge}
           </div>
-          <span class="time-stamp" title="${updatedClock}">更新: ${updatedRelative} (${updatedClock})</span>
+          <div class="session-expand-hint" title="点击展开/收起完整调试信息">
+            <span class="chevron">▶</span>
+            <span class="time-stamp">${updatedRelative}</span>
+          </div>
         </div>
         <div class="session-mid">
-          <span class="session-title">${escapeHtml(title)}</span>
+          <span class="session-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
           <span class="model-pill">[${escapeHtml(modelName)}]</span>
         </div>
         <div class="session-path" title="${escapeHtml(sess.cwd || '~')}">📂 ${escapeHtml(sess.cwd || '~')}</div>
@@ -424,14 +493,60 @@ function renderSessions(sessions) {
           <div>上下文: <span class="metric-val">${ctxPct}% [${ctxSize}]</span></div>
           <div>费用: <span class="metric-val">${cost}</span></div>
         </div>
+
+        <!-- 详细抽屉 (点击卡片展开) -->
+        <div class="session-detail-drawer">
+          <div class="detail-grid">
+            <div class="detail-item">
+              <span class="detail-key">会话 ID (Session ID)</span>
+              <span class="detail-val">${escapeHtml(sess.session_id)}</span>
+            </div>
+            ${sess.conversation_id ? `
+            <div class="detail-item">
+              <span class="detail-key">对话 ID (Conversation ID)</span>
+              <span class="detail-val">${escapeHtml(sess.conversation_id)}</span>
+            </div>` : ''}
+            <div class="detail-item">
+              <span class="detail-key">物理节点 (Node)</span>
+              <span class="detail-val">${escapeHtml(sess.node_id || '--')}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-key">最后活跃时间 (Last Active)</span>
+              <span class="detail-val">${escapeHtml(updatedFull)}</span>
+            </div>
+            ${planTier ? `
+            <div class="detail-item">
+              <span class="detail-key">账户计划 (Plan Tier)</span>
+              <span class="detail-val">${escapeHtml(planTier)}</span>
+            </div>` : ''}
+          </div>
+        </div>
       </div>
     `;
   }
 
   container.innerHTML = html;
+
+  // 绑定卡片点击展开事件
+  container.querySelectorAll('.session-box').forEach(box => {
+    box.addEventListener('click', (e) => {
+      // 避免选中文字时触发折叠
+      const selection = window.getSelection();
+      if (selection && selection.toString().length > 0) return;
+
+      const sid = box.getAttribute('data-session-id');
+      if (!sid) return;
+      if (expandedSessionIds.has(sid)) {
+        expandedSessionIds.delete(sid);
+      } else {
+        expandedSessionIds.add(sid);
+      }
+      renderSessions(sessions, true);
+    });
+  });
 }
 
-// 5. 调试原始上报抽屉
+// 5. 调试原始上报抽屉 (语法高亮与安全内存复制)
 async function loadDebugData() {
   const container = document.getElementById('debug-container');
   if (!container) return;
@@ -448,9 +563,12 @@ async function loadDebugData() {
       return;
     }
 
+    rawReportsCache.clear();
     let html = '';
     for (const r of reports) {
-      const jsonStr = JSON.stringify(r.raw_payload, null, 2);
+      const jsonFormatted = JSON.stringify(r.raw_payload, null, 2);
+      rawReportsCache.set(String(r.id), jsonFormatted);
+
       html += `
         <div class="debug-card">
           <div class="debug-card-header">
@@ -461,18 +579,20 @@ async function loadDebugData() {
               <span>产品: ${escapeHtml(r.product_type)}</span>
               <span>模型: ${escapeHtml(r.model_id)}</span>
             </div>
-            <button class="btn-action btn-sm btn-copy" data-json="${encodeURIComponent(jsonStr)}">复制 JSON</button>
+            <button class="btn-action btn-sm btn-copy" data-report-id="${r.id}">复制 JSON</button>
           </div>
-          <pre class="debug-json"><code>${escapeHtml(jsonStr)}</code></pre>
+          <pre class="debug-json"><code>${syntaxHighlightJSON(r.raw_payload)}</code></pre>
         </div>
       `;
     }
     container.innerHTML = html;
 
-    // 绑定复制按钮
+    // 绑定复制按钮 (直接从内存缓存提取，避免超长 DOM 属性)
     container.querySelectorAll('.btn-copy').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const json = decodeURIComponent(btn.getAttribute('data-json'));
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const rid = btn.getAttribute('data-report-id');
+        const json = rawReportsCache.get(rid) || '';
         navigator.clipboard.writeText(json).then(() => {
           btn.textContent = '已复制!';
           setTimeout(() => { btn.textContent = '复制 JSON'; }, 1500);
@@ -486,7 +606,7 @@ async function loadDebugData() {
 }
 
 // 6. 全局定时刷新总逻辑
-async function refreshDashboard() {
+async function refreshDashboard(forceRedraw = false) {
   try {
     const sessionsPath = selectedNodeId
       ? `api/v1/sessions?node_id=${encodeURIComponent(selectedNodeId)}`
@@ -500,7 +620,7 @@ async function refreshDashboard() {
     ]);
 
     if (!overviewRes.ok || !sessionsRes.ok) {
-      setText('connection-status', '服务异常');
+      setConnectionState(false, '服务异常');
       return;
     }
 
@@ -509,7 +629,7 @@ async function refreshDashboard() {
     const accountQuotas = quotasRes.ok ? await quotasRes.json() : [];
     const sessions = await sessionsRes.json();
 
-    setText('connection-status', '已连接');
+    setConnectionState(true, '已连接');
     setText('last-updated', new Date().toLocaleTimeString());
 
     // 顶部卡片更新
@@ -532,44 +652,64 @@ async function refreshDashboard() {
     setText('val-cost-total', `累计估算: ${formatUSD(overview.total_cost_usd || 0)}`);
 
     // 节点数与账号数
-    setText('val-nodes', overview.active_nodes_count || knownNodes.length || 0);
-    setText('val-nodes-sub', `${overview.active_nodes_count || knownNodes.length || 0} 个在线节点`);
+    const nodeCount = overview.active_nodes_count || knownNodes.length || 0;
+    setText('val-nodes', nodeCount);
+    setText('val-nodes-sub', `${nodeCount} 个在线节点`);
 
     const accountCount = accountQuotas.length || (overview.latest_account && overview.latest_account.email ? 1 : 0);
     setText('val-accounts', accountCount);
     setText('val-accounts-sub', `${accountCount} 个已上报账号`);
 
     // 渲染每日各模型 Token 表格
-    renderDailyTokensTable(dailyTokens);
+    renderDailyTokensTable(dailyTokens, forceRedraw);
 
     // 渲染按账号区分的配额池
-    renderAccountQuotas(accountQuotas);
+    renderAccountQuotas(accountQuotas, forceRedraw);
 
     // 渲染会话列表
-    renderSessions(sessions);
+    renderSessions(sessions, forceRedraw);
 
   } catch (err) {
     console.error('[statusline] refreshDashboard error:', err);
-    setText('connection-status', '连接中断');
+    setConnectionState(false, '连接中断');
   }
+}
+
+// 调度下一次定时刷新 (10s 间隔，页面隐藏时静默暂停)
+function scheduleNextRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async () => {
+    if (!document.hidden) {
+      await refreshDashboard();
+    }
+    scheduleNextRefresh();
+  }, 10000);
 }
 
 // 7. 事件绑定与初始化
 function init() {
   loadNodes();
-  refreshDashboard();
-  setInterval(refreshDashboard, 2500);
+  refreshDashboard(true);
+  scheduleNextRefresh();
+
+  // 监听页面前后台切换
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      refreshDashboard();
+      scheduleNextRefresh();
+    }
+  });
 
   // 节点筛选下拉事件
   const nodeSelect = document.getElementById('node-filter-select');
   if (nodeSelect) {
     nodeSelect.addEventListener('change', (e) => {
       selectedNodeId = e.target.value;
-      refreshDashboard();
+      refreshDashboard(true);
     });
   }
 
-  // 立即刷新按钮
+  // 立即刷新按钮 (使用 try...finally 精确控制按钮状态)
   const btnRefresh = document.getElementById('btn-manual-refresh');
   if (btnRefresh) {
     btnRefresh.addEventListener('click', async () => {
@@ -578,15 +718,14 @@ function init() {
       try {
         await fetch(getApiUrl('api/v1/refresh'), { method: 'POST' });
         await loadNodes();
-        await refreshDashboard();
+        await refreshDashboard(true);
         if (isDebugOpen) await loadDebugData();
       } catch (e) {
         console.error('[statusline] manual refresh error:', e);
-      }
-      setTimeout(() => {
+      } finally {
         btnRefresh.textContent = '⟳ 立即刷新';
         btnRefresh.disabled = false;
-      }, 800);
+      }
     });
   }
 

@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>StatusLine 实时监控看板</title>
-  <link rel="stylesheet" href="style.css?v=0.1.5">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23131a26'/%3E%3Cpath d='M16 6 L26 16 L16 26 L6 16 Z' fill='none' stroke='%2338bdf8' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%2310b981'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css?v=0.1.6">
 </head>
 <body>
   <div class="app-layout">
@@ -13,7 +14,7 @@
       <div class="brand">
         <span class="brand-icon">❖</span>
         <h1 class="brand-title">StatusLine <span>遥测监控</span></h1>
-        <span class="live-dot" title="实时连接中"></span>
+        <span id="live-indicator" class="live-dot" title="实时连接中"></span>
       </div>
       <div class="header-meta">
         <button id="btn-toggle-debug" class="btn-action btn-debug" title="查看最近5次客户端上报原始数据">
@@ -67,7 +68,7 @@
           <span class="section-hint">按日期汇总各模型输入 / 输出 Token 吞吐与占比明细</span>
         </div>
         <div class="date-filter-group" id="date-tabs">
-          <!-- 动态渲染日期切换 Tab -->
+          <span class="badge-range">📅 近 14 天聚合</span>
         </div>
       </div>
       <div class="table-card">
@@ -152,6 +153,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=0.1.5"></script>
+  <script src="app.js?v=0.1.6"></script>
 </body>
 </html>
