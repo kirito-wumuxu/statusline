@@ -27,7 +27,7 @@ func executeMock(r io.Reader, w io.Writer, cfg *config.ClientConfig, n node.Node
 
 	if cfg != nil && cfg.Report.Endpoint != "" {
 		timeout := time.Duration(cfg.Report.TimeoutMS) * time.Millisecond
-		reporter.ReportAsync(env, cfg.Report.Endpoint, timeout)
+		reporter.ReportAsync(env, cfg.Report.Endpoint, cfg.Report.APIKey, timeout)
 	}
 }
 

@@ -8,6 +8,19 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+// Automatically compute base URL for API calls so it works both at root (/)
+// and under reverse proxy subpaths (e.g. /statusline/ or /statusline)
+function getApiUrl(path) {
+  const cleanPath = path.replace(/^\/+/, '');
+  let basePath = window.location.pathname;
+  if (basePath.endsWith('.html') || basePath.endsWith('.htm')) {
+    basePath = basePath.substring(0, basePath.lastIndexOf('/') + 1);
+  } else if (!basePath.endsWith('/')) {
+    basePath += '/';
+  }
+  return basePath + cleanPath;
+}
+
 function formatTokens(n) {
   if (!n || n < 0) return '0';
   if (n < 1000) return String(n);
@@ -52,7 +65,7 @@ function formatRelativeTime(tsSeconds) {
 // 1. 初始化并更新节点下拉筛选器
 async function loadNodes() {
   try {
-    const res = await fetch('/api/v1/nodes');
+    const res = await fetch(getApiUrl('api/v1/nodes'));
     if (!res.ok) return;
     const nodes = await res.json();
     knownNodes = nodes || [];
@@ -331,7 +344,7 @@ async function loadDebugData() {
   if (!container) return;
 
   try {
-    const res = await fetch('/api/v1/debug/raw?limit=5');
+    const res = await fetch(getApiUrl('api/v1/debug/raw?limit=5'));
     if (!res.ok) {
       container.innerHTML = '<div class="empty-placeholder">获取调试数据失败</div>';
       return;
@@ -382,13 +395,15 @@ async function loadDebugData() {
 // 6. 全局定时刷新总逻辑
 async function refreshDashboard() {
   try {
-    const sessionsUrl = selectedNodeId ? `/api/v1/sessions?node_id=${encodeURIComponent(selectedNodeId)}` : '/api/v1/sessions';
+    const sessionsPath = selectedNodeId
+      ? `api/v1/sessions?node_id=${encodeURIComponent(selectedNodeId)}`
+      : 'api/v1/sessions';
 
     const [overviewRes, dailyRes, quotasRes, sessionsRes] = await Promise.all([
-      fetch('/api/v1/overview'),
-      fetch('/api/v1/tokens/daily?days=14'),
-      fetch('/api/v1/quotas'),
-      fetch(sessionsUrl)
+      fetch(getApiUrl('api/v1/overview')),
+      fetch(getApiUrl('api/v1/tokens/daily?days=14')),
+      fetch(getApiUrl('api/v1/quotas')),
+      fetch(getApiUrl(sessionsPath))
     ]);
 
     if (!overviewRes.ok || !sessionsRes.ok) {
@@ -468,7 +483,7 @@ function init() {
       btnRefresh.disabled = true;
       btnRefresh.textContent = '刷新中...';
       try {
-        await fetch('/api/v1/refresh', { method: 'POST' });
+        await fetch(getApiUrl('api/v1/refresh'), { method: 'POST' });
         await loadNodes();
         await refreshDashboard();
         if (isDebugOpen) await loadDebugData();

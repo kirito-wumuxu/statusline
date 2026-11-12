@@ -19,7 +19,7 @@ func TestReportAsyncServerOffline(t *testing.T) {
 
 	// Deliberately unreachable local port
 	unreachableURL := "http://127.0.0.1:54321/api/v1/report"
-	Report(env, unreachableURL, 50*time.Millisecond)
+	Report(env, unreachableURL, "", 50*time.Millisecond)
 
 	elapsed := time.Since(start)
 	if elapsed > 200*time.Millisecond {
@@ -46,7 +46,7 @@ func TestReportAsyncSuccess(t *testing.T) {
 	env := &model.TelemetryEnvelope{
 		NodeID: "node_test_success",
 	}
-	ReportAsync(env, ts.URL, 500*time.Millisecond)
+	ReportAsync(env, ts.URL, "", 500*time.Millisecond)
 
 	select {
 	case <-received:

@@ -14,7 +14,7 @@ import (
 
 // Report sends a telemetry envelope to the server synchronously with strict timeout.
 // Errors and timeouts are completely discarded to ensure terminal non-blocking.
-func Report(env *model.TelemetryEnvelope, serverURL string, timeout time.Duration) {
+func Report(env *model.TelemetryEnvelope, serverURL, apiKey string, timeout time.Duration) {
 	if env == nil || serverURL == "" || serverURL == "off" || serverURL == "none" {
 		return
 	}
@@ -40,6 +40,10 @@ func Report(env *model.TelemetryEnvelope, serverURL string, timeout time.Duratio
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("X-API-Key", apiKey)
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
@@ -54,6 +58,6 @@ func Report(env *model.TelemetryEnvelope, serverURL string, timeout time.Duratio
 }
 
 // ReportAsync dispatches telemetry reporting in a background detached goroutine.
-func ReportAsync(env *model.TelemetryEnvelope, serverURL string, timeout time.Duration) {
-	go Report(env, serverURL, timeout)
+func ReportAsync(env *model.TelemetryEnvelope, serverURL, apiKey string, timeout time.Duration) {
+	go Report(env, serverURL, apiKey, timeout)
 }

@@ -146,3 +146,58 @@ func TestHandlerManualRefresh(t *testing.T) {
 		t.Fatalf("expected 200 OK from /api/refresh, got %d (body: %s)", w.Code, w.Body.String())
 	}
 }
+
+func TestHandlerReportAPIKeyAuth(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "server_auth_test.db")
+	store, err := storage.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	cfg := config.DefaultServerConfig()
+	cfg.Server.APIKey = "secret-token-123"
+	srv := NewServer(cfg, store, nil)
+
+	payload := `{"product":"antigravity","session_id":"sess_auth","model":{"id":"gemini-flash"}}`
+
+	// 1. Without auth header -> 401 Unauthorized
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewBufferString(payload))
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w1, req1)
+	if w1.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", w1.Code)
+	}
+
+	// 2. With wrong auth header -> 401 Unauthorized
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewBufferString(payload))
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("X-API-Key", "wrong-key")
+	w2 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w2, req2)
+	if w2.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for wrong key, got %d", w2.Code)
+	}
+
+	// 3. With correct X-API-Key -> 200 OK
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewBufferString(payload))
+	req3.Header.Set("Content-Type", "application/json")
+	req3.Header.Set("X-API-Key", "secret-token-123")
+	w3 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for correct X-API-Key, got %d", w3.Code)
+	}
+
+	// 4. With correct Bearer Authorization -> 200 OK
+	req4 := httptest.NewRequest(http.MethodPost, "/api/v1/report", bytes.NewBufferString(payload))
+	req4.Header.Set("Content-Type", "application/json")
+	req4.Header.Set("Authorization", "Bearer secret-token-123")
+	w4 := httptest.NewRecorder()
+	srv.Router().ServeHTTP(w4, req4)
+	if w4.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for correct Bearer auth, got %d", w4.Code)
+	}
+}

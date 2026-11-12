@@ -5,12 +5,33 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"statusline/internal/model"
 	"statusline/internal/node"
 )
 
+func (s *Server) checkAPIKey(r *http.Request) bool {
+	if s.cfg == nil || s.cfg.Server.APIKey == "" {
+		return true
+	}
+	key := r.Header.Get("X-API-Key")
+	if key == "" {
+		auth := r.Header.Get("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			key = strings.TrimPrefix(auth, "Bearer ")
+		}
+	}
+	return key == s.cfg.Server.APIKey
+}
+
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAPIKey(r) {
+		slog.Warn("report: unauthorized API key", "remote_addr", r.RemoteAddr)
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil || len(body) == 0 {
 		slog.Warn("report: empty or unreadable request body", "error", err)

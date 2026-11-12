@@ -77,7 +77,7 @@ func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 		if timeout <= 0 {
 			timeout = 100 * time.Millisecond
 		}
-		reporter.Report(env, cfg.Report.Endpoint, timeout)
+		reporter.Report(env, cfg.Report.Endpoint, cfg.Report.APIKey, timeout)
 	}
 }
 
