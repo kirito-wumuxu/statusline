@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,8 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to execute schema migration: %w", err)
 	}
+
+	slog.Info("sqlite database opened", "path", dbPath, "max_open_conns", 50)
 
 	return db, nil
 }

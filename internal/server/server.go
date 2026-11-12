@@ -26,8 +26,8 @@ func NewServer(cfg *config.ServerConfig, store *storage.Store, webFS fs.FS) *Ser
 	return s
 }
 
-func (s *Server) Router() *http.ServeMux {
-	return s.router
+func (s *Server) Router() http.Handler {
+	return loggingMiddleware(s.router)
 }
 
 func (s *Server) routes() {

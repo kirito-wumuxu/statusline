@@ -34,8 +34,8 @@
 
 ```text
 .
-├── client.yaml                     # 客户端配置文件模板 (上报、节点指纹、模块化显示)
-├── server.yaml                     # 服务端配置文件模板 (端口、SQLite WAL 存储路径)
+├── client.yaml                     # 客户端配置文件模板 (上报、节点指纹、模块化显示、日志设置)
+├── server.yaml                     # 服务端配置文件模板 (端口、SQLite WAL 存储路径、日志设置)
 ├── go.mod                          # Go 模块定义 (Go 1.22+, modernc.org/sqlite)
 ├── cmd/
 │   ├── statusline/                 # 客户端入口 (stdin -> render -> async report)
@@ -50,6 +50,7 @@
 │           └── style.css
 ├── internal/
 │   ├── config/                     # 配置加载 (YAML + 环境变量覆盖)
+│   ├── logging/                    # 结构化日志 (log/slog，固定写入可执行文件同目录，nopHandler零开销)
 │   ├── node/                       # 跨平台硬件指纹 (Linux/Windows Machine-ID -> SHA256)
 │   ├── model/                      # 遥测模型、归一化与 UTF-8 乱码清洗器
 │   ├── render/                     # 终端 ANSI 状态栏渲染核心与自适应排版
@@ -71,6 +72,7 @@
 │   └── server/                     # 服务端 HTTP 路由与控制器
 │       ├── handlers_report.go      # POST /api/v1/report
 │       ├── handlers_api.go         # GET /api/v1/sessions, overview, quotas, tokens/daily, debug/raw
+│       ├── middleware.go           # HTTP 请求结构化访问日志中间件
 │       └── refresher.go            # 终端空闲重绘调度
 ├── test/
 │   └── e2e/                        # 端到端全链路集成测试
@@ -131,3 +133,19 @@ go test ./... -v
 - **自定义环境变量**:
   - `export STATUSLINE_SERVER_URL="http://127.0.0.1:8628/api/v1/report"`（修改上报地址）
   - `export STATUSLINE_SERVER_URL="off"`（停用遥测上报，纯本地离线渲染）
+  - `export STATUSLINE_LOG_ENABLED="true"`（强制启用日志）
+  - `export STATUSLINE_LOG_LEVEL="debug"`（日志级别：debug / info / warn / error）
+  - `export STATUSLINE_LOG_FORMAT="json"`（日志格式：text / json）
+
+---
+
+## 6. 日志子系统规范 (Logging)
+
+- **零外部依赖**：基于 Go 标准库 `log/slog` 实现结构化日志。
+- **只写文件**：
+  - 日志**固定写入可执行文件所在目录**，绝不写入 `stdout`（严防污染客户端终端状态行管道）。
+  - 客户端日志文件名为 `statusline.log`（默认关闭，`enabled: false`，通过 `nopHandler` 保证零分配零开销）。
+  - 服务端日志文件名为 `statusline-server.log`（默认开启，`enabled: true`，级别 `info`）。
+- **配置与覆盖**：
+  - 可在 `client.yaml` / `server.yaml` 中的 `logging:` 块配置 `enabled`, `level`, `format`。
+  - 支持通过环境变量 `STATUSLINE_LOG_ENABLED`, `STATUSLINE_LOG_LEVEL`, `STATUSLINE_LOG_FORMAT` 临时动态覆盖。

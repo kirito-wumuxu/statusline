@@ -16,3 +16,10 @@ server:
 storage:
   db_path: "~/.local/share/statusline/statusline.db" # SQLite 数据库持久化路径
   wal_mode: true                                   # 启用 WAL 高并发写入模式
+
+# 日志设置（服务端默认开启）
+# 日志文件固定写入可执行文件所在目录的 statusline-server.log
+logging:
+  enabled: true                     # 设为 false 关闭日志
+  level: "info"                     # debug / info / warn / error
+  format: "text"                    # text（人类可读）/ json（结构化）

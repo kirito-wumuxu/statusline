@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -20,6 +21,7 @@ func Report(env *model.TelemetryEnvelope, serverURL string, timeout time.Duratio
 
 	payload, err := json.Marshal(env)
 	if err != nil {
+		slog.Warn("failed to marshal telemetry envelope", "error", err)
 		return
 	}
 
@@ -27,11 +29,14 @@ func Report(env *model.TelemetryEnvelope, serverURL string, timeout time.Duratio
 		timeout = 100 * time.Millisecond
 	}
 
+	slog.Debug("reporting telemetry", "url", serverURL, "payload_bytes", len(payload), "timeout_ms", timeout.Milliseconds())
+
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL, bytes.NewReader(payload))
 	if err != nil {
+		slog.Warn("failed to create report request", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -39,10 +44,13 @@ func Report(env *model.TelemetryEnvelope, serverURL string, timeout time.Duratio
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
+		slog.Warn("telemetry report failed", "url", serverURL, "error", err)
 		return
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
+
+	slog.Debug("telemetry reported", "status", resp.StatusCode)
 }
 
 // ReportAsync dispatches telemetry reporting in a background detached goroutine.

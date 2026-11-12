@@ -14,6 +14,7 @@ type ClientConfig struct {
 	Report  ReportConfig  `yaml:"report"`
 	Node    NodeConfig    `yaml:"node"`
 	Display DisplayConfig `yaml:"display"`
+	Logging LoggingConfig `yaml:"logging"`
 }
 
 // Config is an alias to ClientConfig.
@@ -36,10 +37,19 @@ type DisplayConfig struct {
 	Segments     []string `yaml:"segments"`
 }
 
+// LoggingConfig controls the structured logging subsystem.
+// Log files are always written to the same directory as the executable binary.
+type LoggingConfig struct {
+	Enabled bool   `yaml:"enabled"` // Client default: false; Server default: true
+	Level   string `yaml:"level"`   // debug / info / warn / error (default: info)
+	Format  string `yaml:"format"`  // text / json (default: text)
+}
+
 // ServerConfig holds configuration for the statusline-server telemetry daemon.
 type ServerConfig struct {
 	Server  ServerListenConfig `yaml:"server"`
 	Storage StorageConfig      `yaml:"storage"`
+	Logging LoggingConfig      `yaml:"logging"`
 }
 
 type ServerListenConfig struct {
@@ -86,6 +96,11 @@ func DefaultClientConfig() *ClientConfig {
 			EnableStdout: true,
 			Segments:     DefaultSegments(),
 		},
+		Logging: LoggingConfig{
+			Enabled: false,
+			Level:   "info",
+			Format:  "text",
+		},
 	}
 	applyClientEnvOverrides(cfg)
 	return cfg
@@ -108,6 +123,11 @@ func DefaultServerConfig() *ServerConfig {
 		Storage: StorageConfig{
 			DBPath:  defaultDB,
 			WALMode: true,
+		},
+		Logging: LoggingConfig{
+			Enabled: true,
+			Level:   "info",
+			Format:  "text",
 		},
 	}
 	applyServerEnvOverrides(cfg)
@@ -270,6 +290,7 @@ func applyClientEnvOverrides(cfg *ClientConfig) {
 			cfg.Display.Segments = segs
 		}
 	}
+	applyLoggingEnvOverrides(&cfg.Logging)
 }
 
 func applyServerEnvOverrides(cfg *ServerConfig) {
@@ -283,6 +304,19 @@ func applyServerEnvOverrides(cfg *ServerConfig) {
 	}
 	if dbPath := os.Getenv("STATUSLINE_DB_PATH"); dbPath != "" {
 		cfg.Storage.DBPath = dbPath
+	}
+	applyLoggingEnvOverrides(&cfg.Logging)
+}
+
+func applyLoggingEnvOverrides(lc *LoggingConfig) {
+	if v := os.Getenv("STATUSLINE_LOG_ENABLED"); v != "" {
+		lc.Enabled = v == "true" || v == "1" || v == "yes"
+	}
+	if v := os.Getenv("STATUSLINE_LOG_LEVEL"); v != "" {
+		lc.Level = v
+	}
+	if v := os.Getenv("STATUSLINE_LOG_FORMAT"); v != "" {
+		lc.Format = v
 	}
 }
 

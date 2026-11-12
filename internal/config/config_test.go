@@ -20,6 +20,12 @@ func TestDefaultClientConfig(t *testing.T) {
 	if cfg.Display.Segments[2] != "account" {
 		t.Fatalf("expected 3rd segment to be account, got %s", cfg.Display.Segments[2])
 	}
+	if cfg.Logging.Enabled {
+		t.Fatalf("expected default client logging to be disabled")
+	}
+	if cfg.Logging.Level != "info" {
+		t.Fatalf("expected default client log level info, got %s", cfg.Logging.Level)
+	}
 }
 
 func TestDefaultServerConfig(t *testing.T) {
@@ -32,6 +38,12 @@ func TestDefaultServerConfig(t *testing.T) {
 	}
 	if cfg.Storage.DBPath == "" {
 		t.Fatalf("expected non-empty default db path")
+	}
+	if !cfg.Logging.Enabled {
+		t.Fatalf("expected default server logging to be enabled")
+	}
+	if cfg.Logging.Level != "info" {
+		t.Fatalf("expected default server log level info, got %s", cfg.Logging.Level)
 	}
 }
 
@@ -62,6 +74,34 @@ func TestServerEnvOverrides(t *testing.T) {
 	}
 	if cfg.Storage.DBPath != "/tmp/custom.db" {
 		t.Fatalf("expected db_path override, got %s", cfg.Storage.DBPath)
+	}
+}
+
+func TestLoggingEnvOverrides(t *testing.T) {
+	os.Setenv("STATUSLINE_LOG_ENABLED", "true")
+	defer os.Unsetenv("STATUSLINE_LOG_ENABLED")
+	os.Setenv("STATUSLINE_LOG_LEVEL", "debug")
+	defer os.Unsetenv("STATUSLINE_LOG_LEVEL")
+	os.Setenv("STATUSLINE_LOG_FORMAT", "json")
+	defer os.Unsetenv("STATUSLINE_LOG_FORMAT")
+
+	clientCfg := DefaultClientConfig()
+	if !clientCfg.Logging.Enabled {
+		t.Fatalf("expected client logging enabled via env")
+	}
+	if clientCfg.Logging.Level != "debug" {
+		t.Fatalf("expected client log level debug, got %s", clientCfg.Logging.Level)
+	}
+	if clientCfg.Logging.Format != "json" {
+		t.Fatalf("expected client log format json, got %s", clientCfg.Logging.Format)
+	}
+
+	serverCfg := DefaultServerConfig()
+	if !serverCfg.Logging.Enabled {
+		t.Fatalf("expected server logging enabled via env")
+	}
+	if serverCfg.Logging.Level != "debug" {
+		t.Fatalf("expected server log level debug, got %s", serverCfg.Logging.Level)
 	}
 }
 

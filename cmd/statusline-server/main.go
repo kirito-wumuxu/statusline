@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"statusline/internal/config"
+	"statusline/internal/logging"
 	"statusline/internal/server"
 	"statusline/internal/storage"
 )
@@ -42,6 +44,10 @@ func main() {
 		cfg = config.DefaultServerConfig()
 	}
 
+	// Initialize structured logging (enabled by default for server)
+	cleanup := logging.Setup(cfg.Logging.Enabled, cfg.Logging.Level, cfg.Logging.Format, "statusline-server.log")
+	defer cleanup()
+
 	if *portFlag > 0 {
 		cfg.Server.Port = *portFlag
 	}
@@ -51,6 +57,7 @@ func main() {
 
 	store, err := storage.NewStore(cfg.Storage.DBPath)
 	if err != nil {
+		slog.Error("failed to initialize SQLite database", "db_path", cfg.Storage.DBPath, "error", err)
 		log.Fatalf("Fatal: failed to initialize SQLite database at %s: %v", cfg.Storage.DBPath, err)
 	}
 	defer store.Close()
@@ -72,19 +79,24 @@ func main() {
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
+		slog.Info("StatusLine Server starting", "port", cfg.Server.Port, "db_path", cfg.Storage.DBPath)
 		log.Printf("StatusLine Server listening on http://127.0.0.1:%d (DB: %s)", cfg.Server.Port, cfg.Storage.DBPath)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP server error", "error", err)
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
 
 	<-stopCh
+	slog.Info("shutting down StatusLine Server")
 	log.Println("Shutting down StatusLine Server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
+		slog.Error("server shutdown error", "error", err)
 		log.Printf("Server shutdown error: %v", err)
 	}
+	slog.Info("server gracefully stopped")
 	log.Println("Server gracefully stopped")
 }

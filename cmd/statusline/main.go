@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"time"
 
 	"statusline/internal/config"
 	"statusline/internal/installer"
+	"statusline/internal/logging"
 	"statusline/internal/model"
 	"statusline/internal/node"
 	"statusline/internal/render"
@@ -35,6 +37,7 @@ Init Options:
 
 func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 	raw, _ := io.ReadAll(r)
+	slog.Debug("stdin read", "bytes", len(raw))
 
 	env, data, _ := model.ParseAndNormalize(raw, n)
 
@@ -55,6 +58,7 @@ func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 			if env != nil {
 				env.Normalized.GitBranch = data.VCS.Branch
 			}
+			slog.Debug("git status probed", "branch", branch, "dirty", dirty, "ahead", ahead, "behind", behind)
 		}
 	}
 
@@ -100,6 +104,13 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
+	// Initialize structured logging (disabled by default for client)
+	cleanup := logging.Setup(cfg.Logging.Enabled, cfg.Logging.Level, cfg.Logging.Format, "statusline.log")
+	defer cleanup()
+
+	slog.Debug("config loaded", "endpoint", cfg.Report.Endpoint, "segments", cfg.Display.Segments)
+
 	n := node.GetNodeInfo(cfg.Node.ID, Version)
+	slog.Debug("node info", "node_id", n.NodeID, "hostname", n.Hostname)
 	execute(os.Stdin, os.Stdout, cfg, n)
 }

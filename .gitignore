@@ -39,6 +39,7 @@ go.work.sum
 *.db-shm
 *.sqlite
 *.sqlite3
+*.log
 data/
 
 # Editor and OS metadata

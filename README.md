@@ -167,11 +167,22 @@ display:
     - context     # 上下文进度条 \\\\\\\\ 22% [1M]
     - tokens      # Token 吞吐 ↑1.5k ↓230
     - quota       # 配额余量与冷却倒计时
+
+# 日志设置（客户端默认关闭，不输出任何日志以保护终端管道）
+# 开启后日志固定写入可执行文件所在同目录下的 statusline.log
+logging:
+  enabled: false                    # 设为 true 开启排障日志
+  level: "info"                     # debug / info / warn / error
+  format: "text"                    # text（人类可读）/ json（结构化）
 ```
 
-也可通过环境变量快速覆盖展示顺序：
+也可通过环境变量快速覆盖展示顺序与日志：
 ```bash
 export STATUSLINE_SEGMENTS="account,model,context,tokens,quota"
+
+# 临时开启客户端排障日志
+export STATUSLINE_LOG_ENABLED="true"
+export STATUSLINE_LOG_LEVEL="debug"
 ```
 
 ---
@@ -194,6 +205,13 @@ server:
 storage:
   db_path: "~/.local/share/statusline/statusline.db" # SQLite 数据库持久化路径
   wal_mode: true                                   # 启用 WAL 高并发写入模式
+
+# 日志设置（服务端默认开启）
+# 日志固定写入可执行文件所在同目录下的 statusline-server.log
+logging:
+  enabled: true                     # 设为 false 可停用日志
+  level: "info"                     # debug / info / warn / error
+  format: "text"                    # text / json
 ```
 
 ### 启动命令

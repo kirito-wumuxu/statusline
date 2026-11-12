@@ -37,3 +37,10 @@ display:
     - context
     - tokens
     - quota
+
+# 日志设置（客户端默认关闭，不影响终端状态栏输出）
+# 日志文件固定写入可执行文件所在目录的 statusline.log
+logging:
+  enabled: false                    # 设为 true 开启调试日志
+  level: "info"                     # debug / info / warn / error
+  format: "text"                    # text（人类可读）/ json（结构化）
