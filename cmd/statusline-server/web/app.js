@@ -3,6 +3,11 @@ let selectedNodeId = '';
 let isDebugOpen = false;
 let knownNodes = [];
 
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
 function formatTokens(n) {
   if (!n || n < 0) return '0';
   if (n < 1000) return String(n);
@@ -387,7 +392,7 @@ async function refreshDashboard() {
     ]);
 
     if (!overviewRes.ok || !sessionsRes.ok) {
-      document.getElementById('connection-status').textContent = '服务异常';
+      setText('connection-status', '服务异常');
       return;
     }
 
@@ -396,14 +401,14 @@ async function refreshDashboard() {
     const accountQuotas = quotasRes.ok ? await quotasRes.json() : [];
     const sessions = await sessionsRes.json();
 
-    document.getElementById('connection-status').textContent = '已连接';
-    document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+    setText('connection-status', '已连接');
+    setText('last-updated', new Date().toLocaleTimeString());
 
     // 顶部卡片更新
-    document.getElementById('val-sessions').textContent = overview.active_sessions_count || 0;
+    setText('val-sessions', overview.active_sessions_count || 0);
     const agyCount = (overview.source_breakdown && overview.source_breakdown.antigravity) || 0;
     const claudeCount = (overview.source_breakdown && overview.source_breakdown.claudecode) || 0;
-    document.getElementById('val-sources').textContent = `${agyCount} agy · ${claudeCount} claude`;
+    setText('val-sources', `${agyCount} agy · ${claudeCount} claude`);
 
     // 今日 Token
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -411,20 +416,20 @@ async function refreshDashboard() {
     const todayTokens = todaySummary ? todaySummary.total_tokens : 0;
     const todayIn = todaySummary ? todaySummary.total_input_tokens : 0;
     const todayOut = todaySummary ? todaySummary.total_output_tokens : 0;
-    document.getElementById('val-tokens-today').textContent = formatTokens(todayTokens);
-    document.getElementById('val-tokens-today-detail').textContent = `输入 ↑${formatTokens(todayIn)} · 输出 ↓${formatTokens(todayOut)}`;
+    setText('val-tokens-today', formatTokens(todayTokens));
+    setText('val-tokens-today-detail', `输入 ↑${formatTokens(todayIn)} · 输出 ↓${formatTokens(todayOut)}`);
 
     // 历史总 Token
-    document.getElementById('val-tokens-total').textContent = formatTokens(overview.total_tokens || 0);
-    document.getElementById('val-cost-total').textContent = `累计估算: ${formatUSD(overview.total_cost_usd || 0)}`;
+    setText('val-tokens-total', formatTokens(overview.total_tokens || 0));
+    setText('val-cost-total', `累计估算: ${formatUSD(overview.total_cost_usd || 0)}`);
 
     // 节点数与账号数
-    document.getElementById('val-nodes').textContent = overview.active_nodes_count || knownNodes.length || 0;
-    document.getElementById('val-nodes-sub').textContent = `${overview.active_nodes_count || knownNodes.length || 0} 个在线节点`;
+    setText('val-nodes', overview.active_nodes_count || knownNodes.length || 0);
+    setText('val-nodes-sub', `${overview.active_nodes_count || knownNodes.length || 0} 个在线节点`);
 
     const accountCount = accountQuotas.length || (overview.latest_account && overview.latest_account.email ? 1 : 0);
-    document.getElementById('val-accounts').textContent = accountCount;
-    document.getElementById('val-accounts-sub').textContent = `${accountCount} 个已上报账号`;
+    setText('val-accounts', accountCount);
+    setText('val-accounts-sub', `${accountCount} 个已上报账号`);
 
     // 渲染每日各模型 Token 表格
     renderDailyTokensTable(dailyTokens);
@@ -436,12 +441,13 @@ async function refreshDashboard() {
     renderSessions(sessions);
 
   } catch (err) {
-    document.getElementById('connection-status').textContent = '连接中断';
+    console.error('[statusline] refreshDashboard error:', err);
+    setText('connection-status', '连接中断');
   }
 }
 
 // 7. 事件绑定与初始化
-document.addEventListener('DOMContentLoaded', () => {
+function init() {
   loadNodes();
   refreshDashboard();
   setInterval(refreshDashboard, 2500);
@@ -466,7 +472,9 @@ document.addEventListener('DOMContentLoaded', () => {
         await loadNodes();
         await refreshDashboard();
         if (isDebugOpen) await loadDebugData();
-      } catch (e) {}
+      } catch (e) {
+        console.error('[statusline] manual refresh error:', e);
+      }
       setTimeout(() => {
         btnRefresh.textContent = '⟳ 立即刷新';
         btnRefresh.disabled = false;
@@ -496,4 +504,11 @@ document.addEventListener('DOMContentLoaded', () => {
       debugDrawer.style.display = 'none';
     });
   }
-});
+}
+
+// 确保无论脚本在何种时机执行（loading / interactive / complete），都能立即初始化
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}

@@ -61,7 +61,14 @@ func (s *Server) routes() {
 
 	// Embedded Web Dashboard
 	if s.webFS != nil {
-		s.router.Handle("/", http.FileServer(http.FS(s.webFS)))
+		fileServer := http.FileServer(http.FS(s.webFS))
+		s.router.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Disable browser caching for local real-time dashboard assets
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+			fileServer.ServeHTTP(w, r)
+		}))
 	} else {
 		s.router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
