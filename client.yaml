@@ -1,13 +1,13 @@
 # statusline 客户端配置 (client.yaml)
 # 默认加载路径优先级:
 #   1. 环境变量 STATUSLINE_CLIENT_CONFIG / STATUSLINE_CONFIG
-#   2. 当前工作目录 ./client.yaml
-#   3. 用户全局目录 ~/.config/statusline/client.yaml
-#   4. 兼容兜底 ./config.yaml
+#   2. 二进制所在目录 client.yaml
+#   3. 当前工作目录 ./client.yaml
+#   4. 用户全局目录 ~/.config/statusline/client.yaml
 
 # 遥测数据上报
 report:
-  endpoint: "http://127.0.0.1:8765/api/v1/report" # 设为 "off" 可停用上报，纯本地离线渲染
+  endpoint: "http://127.0.0.1:8628/api/v1/report" # 设为 "off" 可停用上报，纯本地离线渲染
   timeout_ms: 100                                  # 客户端严格上报超时，绝不阻塞终端
   api_key: ""                                      # 可选的上报认证密钥
 

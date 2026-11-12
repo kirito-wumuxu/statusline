@@ -131,7 +131,7 @@ statusline init
 
 - **自定义服务端上报地址**：
   ```bash
-  export STATUSLINE_SERVER_URL="http://127.0.0.1:8765/api/v1/report"
+  export STATUSLINE_SERVER_URL="http://127.0.0.1:8628/api/v1/report"
   ```
 - **纯本地离线模式（完全停用遥测网络上报，仅作为本地终端状态栏渲染）**：
   ```bash
@@ -140,12 +140,12 @@ statusline init
 
 ### 5. 客户端配置与模块化排序 (`client.yaml`)
 
-客户端配置推荐存放于当前工作目录 `./client.yaml` 或用户目录 `~/.config/statusline/client.yaml`（向下兼容 `./config.yaml`）：
+客户端配置默认自动从**二进制所在目录**下检索 `client.yaml`，亦支持当前工作目录 `./client.yaml` 或用户全局目录 `~/.config/statusline/client.yaml`（可通过环境变量 `STATUSLINE_CLIENT_CONFIG` 明确指定）：
 
 ```yaml
 # 遥测数据上报
 report:
-  endpoint: "http://127.0.0.1:8765/api/v1/report" # 设为 "off" 可停用上报，纯本地离线渲染
+  endpoint: "http://127.0.0.1:8628/api/v1/report" # 设为 "off" 可停用上报，纯本地离线渲染
   timeout_ms: 100                                  # 客户端严格上报超时，绝不阻塞终端
   api_key: ""                                      # 可选的上报认证密钥
 
@@ -181,13 +181,13 @@ export STATUSLINE_SEGMENTS="account,model,context,tokens,quota"
 服务端负责接收多节点客户端上报、写入 SQLite3 数据库并提供实时 Web 监控大盘。
 
 ### 服务端配置 (`server.yaml`)
-服务端配置推荐存放于 `./server.yaml` 或 `~/.config/statusline/server.yaml`（向下兼容 `./config.yaml`）：
+服务端配置默认自动从**二进制所在目录**下检索 `server.yaml`，亦支持当前工作目录 `./server.yaml` 或用户目录 `~/.config/statusline/server.yaml`（可通过 `-config` 命令行参数明确指定）：
 
 ```yaml
 # HTTP 监控服务监听与认证
 server:
   host: "0.0.0.0"                                  # 监听网卡地址
-  port: 8765                                       # 监听端口
+  port: 8628                                       # 监听端口
   api_key: ""                                      # 可选的服务端接入认证密钥
 
 # 持久化存储引擎 (纯 Go 零 CGO 嵌入式 SQLite3 WAL 模式)
@@ -198,16 +198,16 @@ storage:
 
 ### 启动命令
 ```bash
-# 使用默认配置启动 (优先读取 ./server.yaml 或 ~/.config/statusline/server.yaml)
+# 使用默认配置启动 (优先读取二进制所在目录/当前目录的 server.yaml)
 statusline-server
 
 # 指定配置文件、端口或数据库路径
-statusline-server -config server.yaml -port 8765 -db ~/.local/share/statusline/statusline.db
+statusline-server -config server.yaml -port 8628 -db ~/.local/share/statusline/statusline.db
 ```
 
 ### Web 实时监控仪表盘
 
-启动后使用浏览器打开 `http://127.0.0.1:8765`：
+启动后使用浏览器打开 `http://127.0.0.1:8628`：
 
 - **会话大盘**：实时展示当前活跃会话数、历史总累计 Token（输入/输出）、总花费（USD）与各节点活跃状态。
 - **趋势分析**：SVG 实时动态渲染近 1 小时内 Token 与请求吞吐曲线。

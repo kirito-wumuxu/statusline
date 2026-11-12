@@ -59,8 +59,8 @@ func TestExecuteSynchronousReporting(t *testing.T) {
 	defer ts.Close()
 
 	cfg := config.DefaultConfig()
-	cfg.Server.Endpoint = ts.URL
-	cfg.Server.TimeoutMS = 500
+	cfg.Report.Endpoint = ts.URL
+	cfg.Report.TimeoutMS = 500
 	n := node.GetNodeInfo("node_test", "1.0.0")
 
 	rawJSON := `{"product":"antigravity","model":{"id":"gemini-3.8-flash"}}`
@@ -77,7 +77,7 @@ func TestExecuteSynchronousReporting(t *testing.T) {
 func TestExecuteGitStatusIntegration(t *testing.T) {
 	// IMP-1: Verify execute probes git status when cwd is present
 	cfg := config.DefaultConfig()
-	cfg.Server.Endpoint = "off"
+	cfg.Report.Endpoint = "off"
 	n := node.GetNodeInfo("node_test", "1.0.0")
 
 	rawJSON := `{"product":"antigravity","model":{"id":"gemini-3.8-flash"},"cwd":"."}`
@@ -94,7 +94,7 @@ func TestExecuteGitStatusIntegration(t *testing.T) {
 
 func TestExecuteAccountAndSegments(t *testing.T) {
 	cfg := config.DefaultConfig()
-	cfg.Server.Endpoint = "off"
+	cfg.Report.Endpoint = "off"
 	cfg.Display.Segments = []string{"account", "model"}
 	n := node.GetNodeInfo("node_test", "1.0.0")
 

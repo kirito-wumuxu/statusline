@@ -12,12 +12,11 @@ import (
 // ClientConfig holds configuration for the statusline client plugin.
 type ClientConfig struct {
 	Report  ReportConfig  `yaml:"report"`
-	Server  ReportConfig  `yaml:"server"` // legacy alias for report in config.yaml
 	Node    NodeConfig    `yaml:"node"`
 	Display DisplayConfig `yaml:"display"`
 }
 
-// Config is an alias to ClientConfig for backwards compatibility.
+// Config is an alias to ClientConfig.
 type Config = ClientConfig
 
 type ReportConfig struct {
@@ -44,12 +43,9 @@ type ServerConfig struct {
 }
 
 type ServerListenConfig struct {
-	Host      string `yaml:"host"`
-	Port      int    `yaml:"port"`
-	APIKey    string `yaml:"api_key"`
-	Endpoint  string `yaml:"endpoint"` // legacy fallback
-	TimeoutMS int    `yaml:"timeout_ms"`
-	DBPath    string `yaml:"db_path"` // legacy fallback from config.yaml
+	Host   string `yaml:"host"`
+	Port   int    `yaml:"port"`
+	APIKey string `yaml:"api_key"`
 }
 
 type StorageConfig struct {
@@ -61,15 +57,24 @@ func DefaultSegments() []string {
 	return []string{"dir", "vcs", "account", "model", "context", "tokens", "quota"}
 }
 
+// getExeDir returns the absolute directory containing the current executable, resolving symlinks.
+var getExeDir = defaultGetExeDir
+
+func defaultGetExeDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return filepath.Dir(exe)
+}
+
 func DefaultClientConfig() *ClientConfig {
 	cfg := &ClientConfig{
 		Report: ReportConfig{
-			Endpoint:  "http://127.0.0.1:8765/api/v1/report",
-			TimeoutMS: 100,
-			APIKey:    "",
-		},
-		Server: ReportConfig{
-			Endpoint:  "http://127.0.0.1:8765/api/v1/report",
+			Endpoint:  "http://127.0.0.1:8628/api/v1/report",
 			TimeoutMS: 100,
 			APIKey:    "",
 		},
@@ -97,9 +102,8 @@ func DefaultServerConfig() *ServerConfig {
 	cfg := &ServerConfig{
 		Server: ServerListenConfig{
 			Host:   "0.0.0.0",
-			Port:   8765,
+			Port:   8628,
 			APIKey: "",
-			DBPath: defaultDB,
 		},
 		Storage: StorageConfig{
 			DBPath:  defaultDB,
@@ -110,36 +114,38 @@ func DefaultServerConfig() *ServerConfig {
 	return cfg
 }
 
-// LoadClientConfig loads client settings from client.yaml, ~/.config/statusline/client.yaml, or config.yaml.
+// LoadClientConfig loads client settings from client.yaml.
+// Priority:
+// 1. Explicit path parameter
+// 2. STATUSLINE_CLIENT_CONFIG / STATUSLINE_CONFIG environment variable
+// 3. client.yaml in the executable's directory
+// 4. client.yaml in the current working directory
+// 5. ~/.config/statusline/client.yaml
 func LoadClientConfig(path string) (*ClientConfig, error) {
-	cfg := &ClientConfig{
-		Node: NodeConfig{
-			ID:         "",
-			CustomTags: map[string]string{"env": "local"},
-		},
-		Display: DisplayConfig{
-			EnableStdout: true,
-			Segments:     DefaultSegments(),
-		},
-	}
+	cfg := DefaultClientConfig()
 
 	if path == "" {
 		homeDir, _ := os.UserHomeDir()
-		candidates := []string{
-			os.Getenv("STATUSLINE_CLIENT_CONFIG"),
-			os.Getenv("STATUSLINE_CONFIG"),
-			"client.yaml",
-			filepath.Join(homeDir, ".config", "statusline", "client.yaml"),
-			"config.yaml",
-			filepath.Join(homeDir, ".config", "statusline", "config.yaml"),
+		var candidates []string
+		if env := os.Getenv("STATUSLINE_CLIENT_CONFIG"); env != "" {
+			candidates = append(candidates, env)
 		}
+		if env := os.Getenv("STATUSLINE_CONFIG"); env != "" {
+			candidates = append(candidates, env)
+		}
+		if exeDir := getExeDir(); exeDir != "" {
+			candidates = append(candidates, filepath.Join(exeDir, "client.yaml"))
+		}
+		candidates = append(candidates, "client.yaml")
+		if homeDir != "" {
+			candidates = append(candidates, filepath.Join(homeDir, ".config", "statusline", "client.yaml"))
+		}
+
 		for _, c := range candidates {
-			if c != "" {
-				expanded := expandHome(c)
-				if _, err := os.Stat(expanded); err == nil {
-					path = expanded
-					break
-				}
+			expanded := expandHome(c)
+			if _, err := os.Stat(expanded); err == nil {
+				path = expanded
+				break
 			}
 		}
 	}
@@ -157,30 +163,12 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 		}
 	}
 
-	// Resolve endpoint defaults and legacy fallbacks
 	if cfg.Report.Endpoint == "" {
-		if cfg.Server.Endpoint != "" {
-			cfg.Report.Endpoint = cfg.Server.Endpoint
-		} else {
-			cfg.Report.Endpoint = "http://127.0.0.1:8765/api/v1/report"
-		}
+		cfg.Report.Endpoint = "http://127.0.0.1:8628/api/v1/report"
 	}
-	if cfg.Report.TimeoutMS == 0 {
-		if cfg.Server.TimeoutMS != 0 {
-			cfg.Report.TimeoutMS = cfg.Server.TimeoutMS
-		} else {
-			cfg.Report.TimeoutMS = 100
-		}
+	if cfg.Report.TimeoutMS <= 0 {
+		cfg.Report.TimeoutMS = 100
 	}
-	if cfg.Report.APIKey == "" && cfg.Server.APIKey != "" {
-		cfg.Report.APIKey = cfg.Server.APIKey
-	}
-
-	// Mirror to Server field for full backward compatibility
-	cfg.Server.Endpoint = cfg.Report.Endpoint
-	cfg.Server.TimeoutMS = cfg.Report.TimeoutMS
-	cfg.Server.APIKey = cfg.Report.APIKey
-
 	if len(cfg.Display.Segments) == 0 {
 		cfg.Display.Segments = DefaultSegments()
 	}
@@ -193,36 +181,38 @@ func LoadConfig(path string) (*ClientConfig, error) {
 	return LoadClientConfig(path)
 }
 
-// LoadServerConfig loads server settings from server.yaml, ~/.config/statusline/server.yaml, or config.yaml.
+// LoadServerConfig loads server settings from server.yaml.
+// Priority:
+// 1. Explicit path parameter (-config)
+// 2. STATUSLINE_SERVER_CONFIG / STATUSLINE_CONFIG environment variable
+// 3. server.yaml in the executable's directory
+// 4. server.yaml in the current working directory
+// 5. ~/.config/statusline/server.yaml
 func LoadServerConfig(path string) (*ServerConfig, error) {
-	cfg := &ServerConfig{
-		Server: ServerListenConfig{
-			Host:   "0.0.0.0",
-			Port:   8765,
-			APIKey: "",
-		},
-		Storage: StorageConfig{
-			WALMode: true,
-		},
-	}
+	cfg := DefaultServerConfig()
 
 	if path == "" {
 		homeDir, _ := os.UserHomeDir()
-		candidates := []string{
-			os.Getenv("STATUSLINE_SERVER_CONFIG"),
-			os.Getenv("STATUSLINE_CONFIG"),
-			"server.yaml",
-			filepath.Join(homeDir, ".config", "statusline", "server.yaml"),
-			"config.yaml",
-			filepath.Join(homeDir, ".config", "statusline", "config.yaml"),
+		var candidates []string
+		if env := os.Getenv("STATUSLINE_SERVER_CONFIG"); env != "" {
+			candidates = append(candidates, env)
 		}
+		if env := os.Getenv("STATUSLINE_CONFIG"); env != "" {
+			candidates = append(candidates, env)
+		}
+		if exeDir := getExeDir(); exeDir != "" {
+			candidates = append(candidates, filepath.Join(exeDir, "server.yaml"))
+		}
+		candidates = append(candidates, "server.yaml")
+		if homeDir != "" {
+			candidates = append(candidates, filepath.Join(homeDir, ".config", "statusline", "server.yaml"))
+		}
+
 		for _, c := range candidates {
-			if c != "" {
-				expanded := expandHome(c)
-				if _, err := os.Stat(expanded); err == nil {
-					path = expanded
-					break
-				}
+			expanded := expandHome(c)
+			if _, err := os.Stat(expanded); err == nil {
+				path = expanded
+				break
 			}
 		}
 	}
@@ -240,34 +230,29 @@ func LoadServerConfig(path string) (*ServerConfig, error) {
 		}
 	}
 
-	homeDir, _ := os.UserHomeDir()
-	defaultDB := filepath.Join(homeDir, ".local", "share", "statusline", "statusline.db")
-
-	// Legacy fallback: if storage.db_path is empty but server.db_path is set in config.yaml
-	if cfg.Storage.DBPath == "" {
-		if cfg.Server.DBPath != "" {
-			cfg.Storage.DBPath = cfg.Server.DBPath
-		} else {
-			cfg.Storage.DBPath = defaultDB
-		}
+	if cfg.Server.Port <= 0 {
+		cfg.Server.Port = 8628
 	}
-	cfg.Server.DBPath = cfg.Storage.DBPath
+	if cfg.Server.Host == "" {
+		cfg.Server.Host = "0.0.0.0"
+	}
+	if cfg.Storage.DBPath == "" {
+		homeDir, _ := os.UserHomeDir()
+		cfg.Storage.DBPath = filepath.Join(homeDir, ".local", "share", "statusline", "statusline.db")
+	}
 
 	applyServerEnvOverrides(cfg)
 	cfg.Storage.DBPath = expandHome(cfg.Storage.DBPath)
-	cfg.Server.DBPath = cfg.Storage.DBPath
 	return cfg, nil
 }
 
 func applyClientEnvOverrides(cfg *ClientConfig) {
 	if endpoint := os.Getenv("STATUSLINE_SERVER_URL"); endpoint != "" {
 		cfg.Report.Endpoint = endpoint
-		cfg.Server.Endpoint = endpoint
 	}
 	if timeoutStr := os.Getenv("STATUSLINE_TIMEOUT_MS"); timeoutStr != "" {
 		if t, err := strconv.Atoi(timeoutStr); err == nil && t > 0 {
 			cfg.Report.TimeoutMS = t
-			cfg.Server.TimeoutMS = t
 		}
 	}
 	if nodeID := os.Getenv("STATUSLINE_NODE_ID"); nodeID != "" {
@@ -298,7 +283,6 @@ func applyServerEnvOverrides(cfg *ServerConfig) {
 	}
 	if dbPath := os.Getenv("STATUSLINE_DB_PATH"); dbPath != "" {
 		cfg.Storage.DBPath = dbPath
-		cfg.Server.DBPath = dbPath
 	}
 }
 

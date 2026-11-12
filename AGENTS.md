@@ -36,7 +36,6 @@
 .
 ├── client.yaml                     # 客户端配置文件模板 (上报、节点指纹、模块化显示)
 ├── server.yaml                     # 服务端配置文件模板 (端口、SQLite WAL 存储路径)
-├── config.yaml                     # 统一配置文件模板 (兼容旧版合并配置)
 ├── go.mod                          # Go 模块定义 (Go 1.22+, modernc.org/sqlite)
 ├── cmd/
 │   ├── statusline/                 # 客户端入口 (stdin -> render -> async report)
@@ -116,9 +115,9 @@ go test ./... -v
 
 ### 启动服务端
 ```bash
-./bin/statusline-server -port 8765 -db ~/.local/share/statusline/statusline.db
+./bin/statusline-server -port 8628 -db ~/.local/share/statusline/statusline.db
 ```
-浏览器访问 `http://127.0.0.1:8765` 即可打开实时深色 Web 监控仪表盘。
+浏览器访问 `http://127.0.0.1:8628` 即可打开实时深色 Web 监控仪表盘（默认配置文件自动在二进制所在目录下检索 `server.yaml`）。
 
 ### 客户端接入配置
 - **一键配置 Antigravity CLI 与 Claude Code**:
@@ -128,7 +127,7 @@ go test ./... -v
   自动解析当前运行二进制的绝对路径（原地生效，无需移动），并自动配置：
   - Antigravity: `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`）
   - Claude Code: `~/.claude/settings.json`（及工作区 `.claude/settings.json`）
-  支持 `-target [all|agy|claude]` 过滤目标工具。
+  支持 `-target [all|agy|claude]` 过滤目标工具。客户端默认在二进制所在目录下检索 `client.yaml`。
 - **自定义环境变量**:
-  - `export STATUSLINE_SERVER_URL="http://127.0.0.1:8765/api/v1/report"`（修改上报地址）
+  - `export STATUSLINE_SERVER_URL="http://127.0.0.1:8628/api/v1/report"`（修改上报地址）
   - `export STATUSLINE_SERVER_URL="off"`（停用遥测上报，纯本地离线渲染）

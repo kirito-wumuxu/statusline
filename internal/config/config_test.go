@@ -8,8 +8,8 @@ import (
 
 func TestDefaultClientConfig(t *testing.T) {
 	cfg := DefaultClientConfig()
-	if cfg.Report.Endpoint != "http://127.0.0.1:8765/api/v1/report" {
-		t.Fatalf("expected default endpoint, got %s", cfg.Report.Endpoint)
+	if cfg.Report.Endpoint != "http://127.0.0.1:8628/api/v1/report" {
+		t.Fatalf("expected default endpoint http://127.0.0.1:8628/api/v1/report, got %s", cfg.Report.Endpoint)
 	}
 	if cfg.Report.TimeoutMS != 100 {
 		t.Fatalf("expected default timeout 100ms, got %d", cfg.Report.TimeoutMS)
@@ -24,8 +24,8 @@ func TestDefaultClientConfig(t *testing.T) {
 
 func TestDefaultServerConfig(t *testing.T) {
 	cfg := DefaultServerConfig()
-	if cfg.Server.Port != 8765 {
-		t.Fatalf("expected default port 8765, got %d", cfg.Server.Port)
+	if cfg.Server.Port != 8628 {
+		t.Fatalf("expected default port 8628, got %d", cfg.Server.Port)
 	}
 	if cfg.Server.Host != "0.0.0.0" {
 		t.Fatalf("expected default host 0.0.0.0, got %s", cfg.Server.Host)
@@ -69,7 +69,7 @@ func TestLoadClientConfigFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	yamlContent := `
 report:
-  endpoint: "http://10.0.0.1:8765/api/v1/report"
+  endpoint: "http://10.0.0.1:8628/api/v1/report"
   timeout_ms: 150
 node:
   id: "laptop-01"
@@ -88,7 +88,7 @@ display:
 	if err != nil {
 		t.Fatalf("LoadClientConfig failed: %v", err)
 	}
-	if cfg.Report.Endpoint != "http://10.0.0.1:8765/api/v1/report" {
+	if cfg.Report.Endpoint != "http://10.0.0.1:8628/api/v1/report" {
 		t.Errorf("expected endpoint override from file, got %s", cfg.Report.Endpoint)
 	}
 	if cfg.Report.TimeoutMS != 150 {
@@ -132,46 +132,52 @@ storage:
 	}
 }
 
-func TestLegacyConfigYamlCompatibility(t *testing.T) {
+func TestBinaryDirConfigResolution(t *testing.T) {
+	// Verify that getExeDir returns a valid directory path or empty string
+	exeDir := getExeDir()
+	if exeDir != "" {
+		if _, err := os.Stat(exeDir); err != nil {
+			t.Errorf("getExeDir returned non-existent directory: %s", exeDir)
+		}
+	}
+
+	// Test loading config automatically from executable directory
 	tmpDir := t.TempDir()
-	legacyYAML := `
-server:
-  endpoint: "http://127.0.0.1:8765/api/v1/report"
-  port: 7777
-  db_path: "/legacy/statusline.db"
+	origGetExeDir := getExeDir
+	getExeDir = func() string { return tmpDir }
+	defer func() { getExeDir = origGetExeDir }()
+
+	clientYAML := `
+report:
+  endpoint: "http://127.0.0.1:8628/api/v1/report"
 node:
-  id: "legacy-node"
-display:
-  segments:
-    - dir
-    - model
+  id: "exe-dir-node"
 `
-	legacyPath := filepath.Join(tmpDir, "config.yaml")
-	if err := os.WriteFile(legacyPath, []byte(legacyYAML), 0644); err != nil {
-		t.Fatalf("failed to write legacy config: %v", err)
+	if err := os.WriteFile(filepath.Join(tmpDir, "client.yaml"), []byte(clientYAML), 0644); err != nil {
+		t.Fatalf("failed to write client.yaml: %v", err)
 	}
 
-	// 1. Client loads legacy config.yaml
-	clientCfg, err := LoadClientConfig(legacyPath)
-	if err != nil {
-		t.Fatalf("LoadClientConfig on legacy config failed: %v", err)
-	}
-	if clientCfg.Report.Endpoint != "http://127.0.0.1:8765/api/v1/report" {
-		t.Errorf("expected client to read server.endpoint from legacy config, got %s", clientCfg.Report.Endpoint)
-	}
-	if clientCfg.Node.ID != "legacy-node" {
-		t.Errorf("expected node ID legacy-node, got %s", clientCfg.Node.ID)
+	serverYAML := `
+server:
+  port: 8628
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "server.yaml"), []byte(serverYAML), 0644); err != nil {
+		t.Fatalf("failed to write server.yaml: %v", err)
 	}
 
-	// 2. Server loads legacy config.yaml
-	serverCfg, err := LoadServerConfig(legacyPath)
+	clientCfg, err := LoadClientConfig("")
 	if err != nil {
-		t.Fatalf("LoadServerConfig on legacy config failed: %v", err)
+		t.Fatalf("LoadClientConfig from exe dir failed: %v", err)
 	}
-	if serverCfg.Server.Port != 7777 {
-		t.Errorf("expected server to read server.port from legacy config, got %d", serverCfg.Server.Port)
+	if clientCfg.Node.ID != "exe-dir-node" {
+		t.Errorf("expected node id 'exe-dir-node', got %s", clientCfg.Node.ID)
 	}
-	if serverCfg.Storage.DBPath != "/legacy/statusline.db" {
-		t.Errorf("expected server to read server.db_path from legacy config, got %s", serverCfg.Storage.DBPath)
+
+	serverCfg, err := LoadServerConfig("")
+	if err != nil {
+		t.Fatalf("LoadServerConfig from exe dir failed: %v", err)
+	}
+	if serverCfg.Server.Port != 8628 {
+		t.Errorf("expected port 8628, got %d", serverCfg.Server.Port)
 	}
 }

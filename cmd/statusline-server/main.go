@@ -31,9 +31,9 @@ func init() {
 }
 
 func main() {
-	portFlag := flag.Int("port", 0, "HTTP server listening port")
+	portFlag := flag.Int("port", 0, "HTTP server listening port (default: 8628)")
 	dbFlag := flag.String("db", "", "Path to SQLite database file")
-	configFlag := flag.String("config", "", "Path to server.yaml (or config.yaml)")
+	configFlag := flag.String("config", "", "Path to server.yaml")
 	flag.Parse()
 
 	cfg, err := config.LoadServerConfig(*configFlag)
@@ -47,7 +47,6 @@ func main() {
 	}
 	if *dbFlag != "" {
 		cfg.Storage.DBPath = *dbFlag
-		cfg.Server.DBPath = *dbFlag
 	}
 
 	store, err := storage.NewStore(cfg.Storage.DBPath)

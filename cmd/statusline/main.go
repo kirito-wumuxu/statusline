@@ -68,12 +68,12 @@ func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 
 	// CRIT-1: Terminal output is already written. Synchronously report with strict timeout
 	// so Go runtime doesn't terminate before HTTP packets leave the machine.
-	if cfg != nil && cfg.Server.Endpoint != "" && cfg.Server.Endpoint != "off" && cfg.Server.Endpoint != "none" {
-		timeout := time.Duration(cfg.Server.TimeoutMS) * time.Millisecond
+	if cfg != nil && cfg.Report.Endpoint != "" && cfg.Report.Endpoint != "off" && cfg.Report.Endpoint != "none" {
+		timeout := time.Duration(cfg.Report.TimeoutMS) * time.Millisecond
 		if timeout <= 0 {
 			timeout = 100 * time.Millisecond
 		}
-		reporter.Report(env, cfg.Server.Endpoint, timeout)
+		reporter.Report(env, cfg.Report.Endpoint, timeout)
 	}
 }
 
