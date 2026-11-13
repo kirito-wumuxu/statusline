@@ -95,7 +95,8 @@ statusline init
 2. **多工具并发配置**：
    - **Antigravity CLI**：自动定位并安全配置 `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`），写入 `"statusLine"` 块，无损保留原有其他配置；
    - **Claude Code**：自动配置 `~/.claude/settings.json`（及当前工作区的 `.claude/settings.json`），写入标准 `"statusLine": {"type": "command", "command": "..."}` 配置；
-3. 执行完成后，重启 Antigravity CLI 或 Claude Code 即可即时呈现状态栏。
+3. **远端别名映射同步**：执行时自动通过服务端 API 拉取最新的配额实体、模型与账号别名规则，无缝更新至本地 `client.yaml`，供终端离线毫秒级极速渲染；
+4. 执行完成后，重启 Antigravity CLI 或 Claude Code 即可即时呈现状态栏。
 
 > **高级选项**：
 > - `statusline init -target claude`：仅配置 Claude Code；

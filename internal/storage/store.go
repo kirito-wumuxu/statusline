@@ -611,6 +611,8 @@ func (s *Store) GetRecentRawReports(limit int) ([]RawReportItem, error) {
 // AccountQuotaBucket represents one quota bucket under an account.
 type AccountQuotaBucket struct {
 	QuotaKey          string  `json:"quota_key"`
+	Prefix            string  `json:"prefix"`       // stripped key prefix, e.g. "gemini", "gemini-argon-wtu", "3p"
+	WindowLabel       string  `json:"window_label"` // e.g. "5h", "7d", "24h"
 	RemainingFraction float64 `json:"remaining_fraction"`
 	RemainingPct      int     `json:"remaining_pct"`
 	ResetTime         string  `json:"reset_time"`
@@ -653,9 +655,19 @@ func (s *Store) GetGroupedAccountQuotas() ([]AccountQuotaGroup, error) {
 
 		pct := int(math.Round(r.RemainingFraction * 100))
 		dur := model.FormatDurationCompact(r.ResetInSeconds)
+		prefix, win := model.SplitQuotaKeySuffix(r.QuotaKey)
+		if win == "" {
+			if r.ResetInSeconds <= 86400 {
+				win = "5h"
+			} else {
+				win = "7d"
+			}
+		}
 
 		grp.Buckets = append(grp.Buckets, AccountQuotaBucket{
 			QuotaKey:          r.QuotaKey,
+			Prefix:            prefix,
+			WindowLabel:       win,
 			RemainingFraction: r.RemainingFraction,
 			RemainingPct:      pct,
 			ResetTime:         r.ResetTime,
@@ -664,16 +676,31 @@ func (s *Store) GetGroupedAccountQuotas() ([]AccountQuotaGroup, error) {
 		})
 
 		lower := strings.ToLower(r.QuotaKey)
-		if strings.Contains(lower, "gemini") {
+		// Only standard gemini keys populate grp.Gemini to avoid sub-pools (argon) overwriting standard weekly
+		if strings.HasPrefix(lower, "gemini-5h") || lower == "gemini-short" {
 			if grp.Gemini == nil {
 				grp.Gemini = &model.ProviderQuota{ShortPercentage: pct, ShortReset: dur}
+			} else {
+				grp.Gemini.ShortPercentage = pct
+				grp.Gemini.ShortReset = dur
+			}
+		} else if strings.HasPrefix(lower, "gemini-weekly") {
+			if grp.Gemini == nil {
+				grp.Gemini = &model.ProviderQuota{LongPercentage: pct, LongReset: dur}
 			} else {
 				grp.Gemini.LongPercentage = pct
 				grp.Gemini.LongReset = dur
 			}
-		} else if strings.Contains(lower, "claude") || strings.Contains(lower, "sonnet") || strings.Contains(lower, "opus") || strings.Contains(lower, "3p") {
+		} else if strings.HasPrefix(lower, "3p-5h") || strings.Contains(lower, "claude-short") {
 			if grp.Claude == nil {
 				grp.Claude = &model.ProviderQuota{ShortPercentage: pct, ShortReset: dur}
+			} else {
+				grp.Claude.ShortPercentage = pct
+				grp.Claude.ShortReset = dur
+			}
+		} else if strings.HasPrefix(lower, "3p-weekly") || strings.Contains(lower, "claude-weekly") {
+			if grp.Claude == nil {
+				grp.Claude = &model.ProviderQuota{LongPercentage: pct, LongReset: dur}
 			} else {
 				grp.Claude.LongPercentage = pct
 				grp.Claude.LongReset = dur
@@ -686,4 +713,81 @@ func (s *Store) GetGroupedAccountQuotas() ([]AccountQuotaGroup, error) {
 		result = append(result, *groupMap[email])
 	}
 	return result, nil
+}
+
+// GetDisplayAliases loads all configured display aliases grouped by category.
+func (s *Store) GetDisplayAliases() (*model.DisplayAliasesConfig, error) {
+	rows, err := s.db.Query("SELECT category, alias_key, display_name, short_name FROM display_aliases ORDER BY category, alias_key")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cfg := &model.DisplayAliasesConfig{
+		Quotas:   []model.DisplayAliasItem{},
+		Models:   []model.DisplayAliasItem{},
+		Accounts: []model.DisplayAliasItem{},
+	}
+
+	for rows.Next() {
+		var cat, key, name, short string
+		if err := rows.Scan(&cat, &key, &name, &short); err != nil {
+			return nil, err
+		}
+		item := model.DisplayAliasItem{
+			Category:    cat,
+			Key:         key,
+			DisplayName: name,
+			ShortName:   short,
+		}
+		switch cat {
+		case "quota":
+			cfg.Quotas = append(cfg.Quotas, item)
+		case "model":
+			cfg.Models = append(cfg.Models, item)
+		case "account":
+			cfg.Accounts = append(cfg.Accounts, item)
+		}
+	}
+
+	return cfg, nil
+}
+
+// SaveDisplayAliases upserts a batch of alias items into display_aliases.
+func (s *Store) SaveDisplayAliases(items []model.DisplayAliasItem) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO display_aliases (category, alias_key, display_name, short_name, updated_at)
+		VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		ON CONFLICT(category, alias_key) DO UPDATE SET
+			display_name = excluded.display_name,
+			short_name = excluded.short_name,
+			updated_at = excluded.updated_at
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, item := range items {
+		if item.Category == "" || item.Key == "" {
+			continue
+		}
+		if _, err := stmt.Exec(item.Category, item.Key, item.DisplayName, item.ShortName); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// DeleteDisplayAlias deletes a specific alias by category and key.
+func (s *Store) DeleteDisplayAlias(category, key string) error {
+	_, err := s.db.Exec("DELETE FROM display_aliases WHERE category = ? AND alias_key = ?", category, key)
+	return err
 }

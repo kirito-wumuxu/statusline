@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>StatusLine 实时监控看板</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23131a26'/%3E%3Cpath d='M16 6 L26 16 L16 26 L6 16 Z' fill='none' stroke='%2338bdf8' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%2310b981'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=0.1.6">
+  <link rel="stylesheet" href="style.css?v=0.1.7">
 </head>
 <body>
   <div class="app-layout">
@@ -17,6 +17,9 @@
         <span id="live-indicator" class="live-dot" title="实时连接中"></span>
       </div>
       <div class="header-meta">
+        <button id="btn-toggle-aliases" class="btn-action btn-aliases" title="管理配额、模型与账号的显示名称和缩写映射">
+          <span>🏷️</span> 别名映射
+        </button>
         <button id="btn-toggle-debug" class="btn-action btn-debug" title="查看最近5次客户端上报原始数据">
           <span>🔍</span> 调试原始上报 (5)
         </button>
@@ -138,6 +141,42 @@
       </div>
     </section>
 
+    <!-- 别名映射配置弹窗 / 抽屉 -->
+    <section class="dashboard-section alias-section" id="alias-modal" style="display: none;">
+      <div class="section-title-bar alias-title-bar">
+        <div>
+          <h2>🏷️ 显示别名映射管理</h2>
+          <span class="section-hint">配置配额前缀、模型与账号的展示名称与终端窄屏缩写（客户端执行 statusline init 时自动同步）</span>
+        </div>
+        <div class="alias-header-actions">
+          <button id="btn-add-alias" class="btn-action btn-sm btn-primary">+ 新增映射</button>
+          <button id="btn-close-alias" class="btn-action btn-sm">关闭</button>
+        </div>
+      </div>
+      <div class="alias-tabs">
+        <button class="alias-tab active" data-tab="quota">配额实体 (Quotas)</button>
+        <button class="alias-tab" data-tab="model">模型实体 (Models)</button>
+        <button class="alias-tab" data-tab="account">账号实体 (Accounts)</button>
+      </div>
+      <div class="table-card">
+        <div class="table-responsive">
+          <table class="data-table" id="alias-table">
+            <thead>
+              <tr>
+                <th style="width: 240px;" id="alias-th-key">匹配前缀 / Key</th>
+                <th style="width: 240px;">完整显示名 (宽屏 display_name)</th>
+                <th style="width: 180px;">紧凑缩写 (窄屏 short_name)</th>
+                <th style="width: 140px; text-align: right;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="alias-tbody">
+              <tr><td colspan="4" class="table-empty">加载别名映射中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- 调试信息抽屉 / 模态卡片 (最近5次上报原始数据) -->
     <section class="dashboard-section debug-section" id="debug-drawer" style="display: none;">
       <div class="section-title-bar debug-title-bar">
@@ -153,6 +192,6 @@
     </section>
   </div>
 
-  <script src="app.js?v=0.1.6"></script>
+  <script src="app.js?v=0.1.7"></script>
 </body>
 </html>

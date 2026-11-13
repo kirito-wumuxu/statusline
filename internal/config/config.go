@@ -11,10 +11,25 @@ import (
 
 // ClientConfig holds configuration for the statusline client plugin.
 type ClientConfig struct {
-	Report  ReportConfig  `yaml:"report"`
-	Node    NodeConfig    `yaml:"node"`
-	Display DisplayConfig `yaml:"display"`
-	Logging LoggingConfig `yaml:"logging"`
+	Report  ReportConfig         `yaml:"report"`
+	Node    NodeConfig           `yaml:"node"`
+	Display DisplayConfig        `yaml:"display"`
+	Aliases DisplayAliasesConfig `yaml:"aliases"`
+	Logging LoggingConfig        `yaml:"logging"`
+}
+
+// DisplayAliasesConfig defines name and short_name mappings for quotas, models, and accounts.
+type DisplayAliasesConfig struct {
+	Quotas   []DisplayAliasItem `yaml:"quotas" json:"quotas"`
+	Models   []DisplayAliasItem `yaml:"models" json:"models"`
+	Accounts []DisplayAliasItem `yaml:"accounts" json:"accounts"`
+}
+
+// DisplayAliasItem represents a mapping rule.
+type DisplayAliasItem struct {
+	Key       string `yaml:"key" json:"key"`
+	Name      string `yaml:"name" json:"name"`
+	ShortName string `yaml:"short_name" json:"short_name"`
 }
 
 // Config is an alias to ClientConfig.
@@ -95,6 +110,21 @@ func DefaultClientConfig() *ClientConfig {
 		Display: DisplayConfig{
 			EnableStdout: true,
 			Segments:     DefaultSegments(),
+		},
+		Aliases: DisplayAliasesConfig{
+			Quotas: []DisplayAliasItem{
+				{Key: "gemini", Name: "Gemini", ShortName: "G"},
+				{Key: "gemini-argon", Name: "Argon", ShortName: "Ar"},
+				{Key: "3p", Name: "Claude", ShortName: "C"},
+				{Key: "claude", Name: "Claude", ShortName: "C"},
+			},
+			Models: []DisplayAliasItem{
+				{Key: "gemini-3.8-flash", Name: "Gemini 3.8 Flash", ShortName: "Flash"},
+				{Key: "gemini-3.8-pro", Name: "Gemini 3.8 Pro", ShortName: "Pro"},
+				{Key: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet", ShortName: "Sonnet"},
+				{Key: "claude-opus", Name: "Claude Opus", ShortName: "Opus"},
+			},
+			Accounts: []DisplayAliasItem{},
 		},
 		Logging: LoggingConfig{
 			Enabled: false,

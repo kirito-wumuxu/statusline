@@ -36,6 +36,9 @@ Init Options:
 }
 
 func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
+	if cfg != nil {
+		render.SetAliases(cfg.Aliases)
+	}
 	raw, _ := io.ReadAll(r)
 	slog.Debug("stdin read", "bytes", len(raw))
 

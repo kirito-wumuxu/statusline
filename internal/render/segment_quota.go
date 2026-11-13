@@ -15,6 +15,13 @@ type bucketInfo struct {
 	remaining int
 }
 
+type providerGroup struct {
+	name      string
+	shortName string
+	color     string
+	buckets   []bucketInfo
+}
+
 // FormatDurationCompact converts seconds to compact format:
 // e.g. 7800s -> "2h10m", 496800s -> "5d18h"
 func FormatDurationCompact(seconds int64) string {
@@ -36,53 +43,93 @@ func FormatDurationCompact(seconds int64) string {
 	return fmt.Sprintf("%dm", remMinutes)
 }
 
-func extractProviderBuckets(data *model.StatusLineData) (gemini, claude []bucketInfo) {
-	if data == nil || data.Quota == nil {
-		return nil, nil
+func getProviderColor(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "gemini"):
+		return AnsiBrightCyan
+	case strings.Contains(lower, "argon"):
+		return AnsiLavender
+	case strings.Contains(lower, "claude") || strings.Contains(lower, "3p"):
+		return AnsiOrange
+	default:
+		return AnsiWhite
 	}
+}
+
+func providerPriority(name string) int {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "gemini"):
+		return 1
+	case strings.Contains(lower, "argon"):
+		return 2
+	case strings.Contains(lower, "claude") || lower == "c" || strings.Contains(lower, "3p"):
+		return 3
+	default:
+		return 10
+	}
+}
+
+func extractProviderGroups(data *model.StatusLineData) []providerGroup {
+	if data == nil || data.Quota == nil || len(data.Quota) == 0 {
+		return nil
+	}
+
+	groupMap := make(map[string]*providerGroup)
 	for k, b := range data.Quota {
-		lower := strings.ToLower(k)
+		name, shortName, _ := MatchQuotaAlias(k)
 		remPct := int(math.Round(b.RemainingFraction * 100))
 		item := bucketInfo{key: k, bucket: b, remaining: remPct}
 
-		if strings.Contains(lower, "gemini") {
-			gemini = append(gemini, item)
-		} else if strings.Contains(lower, "claude") || strings.Contains(lower, "sonnet") || strings.Contains(lower, "opus") || strings.Contains(lower, "3p") {
-			claude = append(claude, item)
+		grp, exists := groupMap[name]
+		if !exists {
+			color := getProviderColor(name)
+			grp = &providerGroup{
+				name:      name,
+				shortName: shortName,
+				color:     color,
+			}
+			groupMap[name] = grp
 		}
+		grp.buckets = append(grp.buckets, item)
 	}
 
-	sort.Slice(gemini, func(i, j int) bool {
-		return gemini[i].bucket.ResetInSeconds < gemini[j].bucket.ResetInSeconds
-	})
-	sort.Slice(claude, func(i, j int) bool {
-		return claude[i].bucket.ResetInSeconds < claude[j].bucket.ResetInSeconds
+	var groups []providerGroup
+	for _, grp := range groupMap {
+		sort.Slice(grp.buckets, func(i, j int) bool {
+			return grp.buckets[i].bucket.ResetInSeconds < grp.buckets[j].bucket.ResetInSeconds
+		})
+		groups = append(groups, *grp)
+	}
+
+	sort.Slice(groups, func(i, j int) bool {
+		pI := providerPriority(groups[i].name)
+		pJ := providerPriority(groups[j].name)
+		if pI != pJ {
+			return pI < pJ
+		}
+		return groups[i].name < groups[j].name
 	})
 
-	return gemini, claude
+	return groups
 }
 
 // FormatQuota renders the quota section:
-// e.g. "Gemini: 93%(2h10m) 89%(5d18h) | Claude: 100%(4h59m) 99%(5d18h)"
+// e.g. "Gemini: 93%(2h10m) 89%(5d18h) | Argon: 100%(4d4h) | Claude: 100%(4h59m) 99%(5d18h)"
 // If no quota data exists for a provider, it is omitted.
 // If no quota data exists at all, returns an empty string.
 func FormatQuota(data *model.StatusLineData) string {
-	geminiBuckets, claudeBuckets := extractProviderBuckets(data)
-	if len(geminiBuckets) == 0 && len(claudeBuckets) == 0 {
+	groups := extractProviderGroups(data)
+	if len(groups) == 0 {
 		return ""
 	}
 
 	var parts []string
-	if len(geminiBuckets) > 0 {
-		geminiLabel := fmt.Sprintf("%sGemini:%s", AnsiBrightCyan, AnsiReset)
-		geminiStr := formatProviderBuckets(geminiBuckets)
-		parts = append(parts, fmt.Sprintf("%s %s", geminiLabel, geminiStr))
-	}
-
-	if len(claudeBuckets) > 0 {
-		claudeLabel := fmt.Sprintf("%sClaude:%s", AnsiOrange, AnsiReset)
-		claudeStr := formatProviderBuckets(claudeBuckets)
-		parts = append(parts, fmt.Sprintf("%s %s", claudeLabel, claudeStr))
+	for _, g := range groups {
+		label := fmt.Sprintf("%s%s:%s", g.color, g.name, AnsiReset)
+		bStr := formatProviderBuckets(g.buckets)
+		parts = append(parts, fmt.Sprintf("%s %s", label, bStr))
 	}
 
 	sep := fmt.Sprintf(" %s|%s ", AnsiDarkGray, AnsiReset)

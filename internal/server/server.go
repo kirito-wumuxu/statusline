@@ -59,6 +59,14 @@ func (s *Server) routes() {
 	s.router.HandleFunc("GET /api/v1/debug/raw", s.handleGetDebugRaw)
 	s.router.HandleFunc("GET /api/debug/raw", s.handleGetDebugRaw)
 
+	// Display Aliases Config APIs
+	s.router.HandleFunc("GET /api/v1/config/aliases", s.handleGetAliases)
+	s.router.HandleFunc("GET /api/config/aliases", s.handleGetAliases)
+	s.router.HandleFunc("POST /api/v1/config/aliases", s.handleSaveAliases)
+	s.router.HandleFunc("POST /api/config/aliases", s.handleSaveAliases)
+	s.router.HandleFunc("DELETE /api/v1/config/aliases", s.handleDeleteAlias)
+	s.router.HandleFunc("DELETE /api/config/aliases", s.handleDeleteAlias)
+
 	// Embedded Web Dashboard
 	if s.webFS != nil {
 		fileServer := http.FileServer(http.FS(s.webFS))

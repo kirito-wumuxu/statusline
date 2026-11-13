@@ -5,9 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"statusline/internal/config"
+	"statusline/internal/model"
 )
 
 // Options holds configuration for statusline initialization.
@@ -71,6 +78,7 @@ func RunInit(args []string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "✔ Configured %s settings: %s\n", label, opts.SettingsPath)
 		fmt.Fprintf(out, "  - statusLine.command: %s\n", cmdBin)
+		SyncAliasesFromRemote(out)
 		fmt.Fprintln(out, "🎉 Statusline initialized successfully!")
 		return nil
 	}
@@ -123,6 +131,7 @@ func RunInit(args []string, out io.Writer) error {
 	}
 
 	if configuredCount > 0 {
+		SyncAliasesFromRemote(out)
 		fmt.Fprintln(out, "🎉 Statusline initialized successfully! Restart your AI CLI (Antigravity / Claude Code) to apply changes.")
 	}
 
@@ -171,4 +180,100 @@ func configureSettingsFile(filePath, binPath string, isClaude bool) error {
 	formatted = append(formatted, '\n')
 
 	return os.WriteFile(filePath, formatted, 0644)
+}
+
+// SyncAliasesFromRemote attempts to fetch latest display aliases from statusline-server and merge into client.yaml.
+func SyncAliasesFromRemote(out io.Writer) {
+	cfg, _ := config.LoadClientConfig("")
+	if cfg == nil || cfg.Report.Endpoint == "" || strings.ToLower(cfg.Report.Endpoint) == "off" {
+		return
+	}
+
+	endpoint := cfg.Report.Endpoint
+	aliasesURL := endpoint
+	if idx := strings.Index(endpoint, "/api/v1/report"); idx != -1 {
+		aliasesURL = endpoint[:idx] + "/api/v1/config/aliases"
+	} else if idx := strings.Index(endpoint, "/api/report"); idx != -1 {
+		aliasesURL = endpoint[:idx] + "/api/config/aliases"
+	} else {
+		aliasesURL = strings.TrimRight(endpoint, "/") + "/api/v1/config/aliases"
+	}
+
+	req, err := http.NewRequest(http.MethodGet, aliasesURL, nil)
+	if err != nil {
+		return
+	}
+	if cfg.Report.APIKey != "" {
+		req.Header.Set("X-API-Key", cfg.Report.APIKey)
+		req.Header.Set("Authorization", "Bearer "+cfg.Report.APIKey)
+	}
+
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(out, "ℹ 未连接到 statusline-server (%s)，跳过别名同步\n", aliasesURL)
+		return
+	}
+	defer resp.Body.Close()
+
+	var remoteAliases model.DisplayAliasesConfig
+	if err := json.NewDecoder(resp.Body).Decode(&remoteAliases); err != nil {
+		return
+	}
+
+	// Update local client.yaml
+	clientYamlPath := "client.yaml"
+	exe, err := os.Executable()
+	if err == nil {
+		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+			exeDir := filepath.Dir(resolved)
+			targetInExeDir := filepath.Join(exeDir, "client.yaml")
+			if _, err := os.Stat(targetInExeDir); err == nil {
+				clientYamlPath = targetInExeDir
+			}
+		}
+	}
+
+	// Read existing or create new
+	var fileCfg config.ClientConfig
+	if data, err := os.ReadFile(clientYamlPath); err == nil {
+		_ = yaml.Unmarshal(data, &fileCfg)
+	} else {
+		fileCfg = *cfg
+	}
+
+	fileCfg.Aliases = config.DisplayAliasesConfig{
+		Quotas:   make([]config.DisplayAliasItem, 0, len(remoteAliases.Quotas)),
+		Models:   make([]config.DisplayAliasItem, 0, len(remoteAliases.Models)),
+		Accounts: make([]config.DisplayAliasItem, 0, len(remoteAliases.Accounts)),
+	}
+
+	for _, q := range remoteAliases.Quotas {
+		fileCfg.Aliases.Quotas = append(fileCfg.Aliases.Quotas, config.DisplayAliasItem{
+			Key:       q.Key,
+			Name:      q.DisplayName,
+			ShortName: q.ShortName,
+		})
+	}
+	for _, m := range remoteAliases.Models {
+		fileCfg.Aliases.Models = append(fileCfg.Aliases.Models, config.DisplayAliasItem{
+			Key:       m.Key,
+			Name:      m.DisplayName,
+			ShortName: m.ShortName,
+		})
+	}
+	for _, a := range remoteAliases.Accounts {
+		fileCfg.Aliases.Accounts = append(fileCfg.Aliases.Accounts, config.DisplayAliasItem{
+			Key:       a.Key,
+			Name:      a.DisplayName,
+			ShortName: a.ShortName,
+		})
+	}
+
+	outBytes, err := yaml.Marshal(&fileCfg)
+	if err == nil {
+		_ = os.WriteFile(clientYamlPath, outBytes, 0644)
+		fmt.Fprintf(out, "✔ 成功从服务端同步别名映射并写入 %s: %d 个配额规则, %d 个模型规则, %d 个账号规则\n",
+			clientYamlPath, len(fileCfg.Aliases.Quotas), len(fileCfg.Aliases.Models), len(fileCfg.Aliases.Accounts))
+	}
 }

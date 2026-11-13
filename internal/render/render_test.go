@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"statusline/internal/config"
 	"statusline/internal/model"
 )
 
@@ -258,5 +259,91 @@ func TestFormatQuotaProviderFiltering(t *testing.T) {
 	plainBoth := StripANSI(FormatQuota(dataBoth))
 	if !strings.Contains(plainBoth, "Gemini: 85%(2h0m)") || !strings.Contains(plainBoth, "Claude: 95%(5h0m)") || !strings.Contains(plainBoth, "|") {
 		t.Errorf("expected both Gemini and Claude separated by pipe, got %q", plainBoth)
+	}
+}
+
+func TestDisplayAliasesAndDynamicQuotas(t *testing.T) {
+	// Configure test aliases
+	SetAliases(config.DisplayAliasesConfig{
+		Quotas: []config.DisplayAliasItem{
+			{Key: "gemini", Name: "Gemini", ShortName: "G"},
+			{Key: "gemini-argon", Name: "Argon", ShortName: "Ar"},
+			{Key: "3p", Name: "Claude", ShortName: "C"},
+		},
+		Models: []config.DisplayAliasItem{
+			{Key: "gemini-3.8-flash", Name: "Gemini 3.8 Flash", ShortName: "Flash"},
+			{Key: "claude-3-7-sonnet", Name: "Claude 3.7 Sonnet", ShortName: "Sonnet"},
+		},
+		Accounts: []config.DisplayAliasItem{
+			{Key: "dev@example.com", Name: "DevTeam", ShortName: "Dev"},
+		},
+	})
+
+	// Test Quota with Argon and 3p dynamic keys
+	data := &model.StatusLineData{
+		Email: "dev@example.com",
+		Model: model.ModelInfo{
+			ID:          "claude-3-7-sonnet",
+			DisplayName: "",
+		},
+		Quota: map[string]model.QuotaBucket{
+			"gemini-5h":               {RemainingFraction: 0.90, ResetInSeconds: 7200},
+			"gemini-argon-wtu-weekly": {RemainingFraction: 1.0, ResetInSeconds: 360000},
+			"3p-5h":                   {RemainingFraction: 0.80, ResetInSeconds: 14400},
+		},
+	}
+
+	// 1. Wide screen rendering: Gemini, Argon, Claude
+	plainWide := StripANSI(FormatQuota(data))
+	if !strings.Contains(plainWide, "Gemini: 90%(2h0m)") {
+		t.Errorf("expected Gemini in wide quota, got %q", plainWide)
+	}
+	if !strings.Contains(plainWide, "Argon: 100%(4d4h)") {
+		t.Errorf("expected Argon in wide quota, got %q", plainWide)
+	}
+	if !strings.Contains(plainWide, "Claude: 80%(4h0m)") {
+		t.Errorf("expected Claude in wide quota, got %q", plainWide)
+	}
+
+	// Check provider ordering: Gemini -> Argon -> Claude
+	gIdx := strings.Index(plainWide, "Gemini")
+	aIdx := strings.Index(plainWide, "Argon")
+	cIdx := strings.Index(plainWide, "Claude")
+	if !(gIdx < aIdx && aIdx < cIdx) {
+		t.Errorf("expected ordering Gemini < Argon < Claude, got g=%d, a=%d, c=%d in %q", gIdx, aIdx, cIdx, plainWide)
+	}
+
+	// 2. Compact mode rendering: G:, Ar:, C:
+	plainCompact := StripANSI(formatQuotaCompact(data, false))
+	if !strings.Contains(plainCompact, "G: 90%(2h0m)") {
+		t.Errorf("expected G: in compact quota, got %q", plainCompact)
+	}
+	if !strings.Contains(plainCompact, "Ar: 100%(4d4h)") {
+		t.Errorf("expected Ar: in compact quota, got %q", plainCompact)
+	}
+	if !strings.Contains(plainCompact, "C: 80%(4h0m)") {
+		t.Errorf("expected C: in compact quota, got %q", plainCompact)
+	}
+
+	// 3. Model alias with empty DisplayName falls back to alias Name
+	plainModel := StripANSI(FormatModel(data))
+	if !strings.Contains(plainModel, "[Claude 3.7 Sonnet]") {
+		t.Errorf("expected [Claude 3.7 Sonnet] for model without display name, got %q", plainModel)
+	}
+
+	// 4. Compact model uses short_name: [Sonnet]
+	plainModelCompact := StripANSI(formatModelCompact(data))
+	if !strings.Contains(plainModelCompact, "[Sonnet]") {
+		t.Errorf("expected [Sonnet] in compact model, got %q", plainModelCompact)
+	}
+
+	// 5. Account alias: wide uses Name "DevTeam", compact uses ShortName "Dev"
+	plainAccount := StripANSI(FormatAccount(data))
+	if plainAccount != "<DevTeam>" {
+		t.Errorf("expected <DevTeam> in wide account, got %q", plainAccount)
+	}
+	plainAccountCompact := StripANSI(formatAccountCompact(data))
+	if plainAccountCompact != "<Dev>" {
+		t.Errorf("expected <Dev> in compact account, got %q", plainAccountCompact)
 	}
 }

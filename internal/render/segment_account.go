@@ -17,7 +17,12 @@ func FormatAccount(data *model.StatusLineData) string {
 	if email == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s<%s%s%s>%s", AnsiDarkGray, AnsiAmber, email, AnsiDarkGray, AnsiReset)
+	displayName, _ := MatchAccountAlias(email)
+	accStr := email
+	if displayName != "" {
+		accStr = displayName
+	}
+	return fmt.Sprintf("%s<%s%s%s>%s", AnsiDarkGray, AnsiAmber, accStr, AnsiDarkGray, AnsiReset)
 }
 
 // formatAccountCompact formats only the username/prefix before @ for narrow screens.
@@ -29,6 +34,11 @@ func formatAccountCompact(data *model.StatusLineData) string {
 	if email == "" {
 		return ""
 	}
+	_, shortName := MatchAccountAlias(email)
+	if shortName != "" {
+		return fmt.Sprintf("%s<%s%s%s>%s", AnsiDarkGray, AnsiAmber, shortName, AnsiDarkGray, AnsiReset)
+	}
+
 	prefix := email
 	if idx := strings.Index(email, "@"); idx > 0 {
 		prefix = email[:idx]

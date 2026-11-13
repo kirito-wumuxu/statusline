@@ -90,3 +90,13 @@ CREATE TABLE IF NOT EXISTS account_quotas (
     updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     PRIMARY KEY (account_email, quota_key)
 );
+
+-- 5. 显示别名映射表 (display_aliases)
+CREATE TABLE IF NOT EXISTS display_aliases (
+    category            TEXT NOT NULL, -- 'quota', 'model', 'account'
+    alias_key           TEXT NOT NULL, -- 如 'gemini', 'gemini-argon', '3p', 或模型ID/账号
+    display_name        TEXT NOT NULL, -- 常规显示名称
+    short_name          TEXT NOT NULL, -- 空间紧凑缩写
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (category, alias_key)
+);

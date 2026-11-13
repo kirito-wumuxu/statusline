@@ -98,6 +98,32 @@ func TestHandlersReportAndQuery(t *testing.T) {
 	if wDebug.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK from debug/raw, got %d", wDebug.Code)
 	}
+
+	// 8. Test GET /api/v1/config/aliases
+	reqAliases := httptest.NewRequest(http.MethodGet, "/api/v1/config/aliases", nil)
+	wAliases := httptest.NewRecorder()
+	srv.Router().ServeHTTP(wAliases, reqAliases)
+	if wAliases.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from config/aliases, got %d", wAliases.Code)
+	}
+
+	var aliases model.DisplayAliasesConfig
+	if err := json.Unmarshal(wAliases.Body.Bytes(), &aliases); err != nil {
+		t.Fatalf("failed to decode aliases json: %v", err)
+	}
+	if len(aliases.Quotas) == 0 {
+		t.Errorf("expected default quota aliases, got 0")
+	}
+
+	// 9. Test POST /api/v1/config/aliases
+	postPayload := `[{"category":"quota","key":"test-key","name":"Test Model","short_name":"TM"}]`
+	reqPostAliases := httptest.NewRequest(http.MethodPost, "/api/v1/config/aliases", bytes.NewBufferString(postPayload))
+	reqPostAliases.Header.Set("Content-Type", "application/json")
+	wPostAliases := httptest.NewRecorder()
+	srv.Router().ServeHTTP(wPostAliases, reqPostAliases)
+	if wPostAliases.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from POST config/aliases, got %d", wPostAliases.Code)
+	}
 	var debugReports []map[string]interface{}
 	if err := json.Unmarshal(wDebug.Body.Bytes(), &debugReports); err != nil {
 		t.Fatalf("failed to unmarshal debug raw reports: %v", err)

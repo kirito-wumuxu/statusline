@@ -363,6 +363,46 @@ type ProviderQuota struct {
 	LongReset       string `json:"long_reset"`
 }
 
+// SplitQuotaKeySuffix splits a full quota_key into prefix (without duration suffix) and window label:
+// e.g. "gemini-5h" -> ("gemini", "5h")
+// e.g. "gemini-argon-wtu-weekly" -> ("gemini-argon-wtu", "7d")
+// e.g. "3p-5h" -> ("3p", "5h")
+// e.g. "deepseek-daily" -> ("deepseek", "24h")
+func SplitQuotaKeySuffix(key string) (prefix string, window string) {
+	lower := strings.ToLower(key)
+	suffixes := []struct {
+		suffix string
+		window string
+	}{
+		{"-5h", "5h"},
+		{"-weekly", "7d"},
+		{"-daily", "24h"},
+		{"-monthly", "30d"},
+		{"-short", "5h"},
+	}
+	for _, s := range suffixes {
+		if strings.HasSuffix(lower, s.suffix) {
+			return key[:len(key)-len(s.suffix)], s.window
+		}
+	}
+	return key, ""
+}
+
+// DisplayAliasItem represents a single alias mapping rule.
+type DisplayAliasItem struct {
+	Category    string `json:"category,omitempty"` // "quota", "model", "account"
+	Key         string `json:"key"`                // prefix or pattern, e.g. "gemini", "gemini-argon", "3p"
+	DisplayName string `json:"name"`               // display name for full mode
+	ShortName   string `json:"short_name"`         // short name for compact mode
+}
+
+// DisplayAliasesConfig groups all alias mapping rules.
+type DisplayAliasesConfig struct {
+	Quotas   []DisplayAliasItem `json:"quotas"`
+	Models   []DisplayAliasItem `json:"models"`
+	Accounts []DisplayAliasItem `json:"accounts"`
+}
+
 func FormatDurationCompact(seconds int64) string {
 	if seconds <= 0 {
 		return "0m"

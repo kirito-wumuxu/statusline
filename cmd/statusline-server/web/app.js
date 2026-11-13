@@ -1,6 +1,12 @@
 // State
 let selectedNodeId = '';
 let isDebugOpen = false;
+let isAliasesOpen = false;
+let currentAliasTab = 'quota'; // 'quota' | 'model' | 'account'
+let addingNewAlias = false;
+let newAliasPrefill = { key: '', name: '', short: '' };
+let editingAliasKey = null;
+let activeAliases = { quotas: [], models: [], accounts: [] };
 let knownNodes = [];
 const expandedSessionIds = new Set();
 const rawReportsCache = new Map();
@@ -42,6 +48,121 @@ function getApiUrl(path) {
     basePath += '/';
   }
   return basePath + cleanPath;
+}
+
+function getAuthHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  const key = localStorage.getItem('statusline_api_key') || new URLSearchParams(window.location.search).get('api_key');
+  if (key) {
+    headers['X-API-Key'] = key;
+    headers['Authorization'] = 'Bearer ' + key;
+  }
+  return headers;
+}
+
+function formatDurationCompact(seconds) {
+  if (!seconds || seconds <= 0) return '0m';
+  const days = Math.floor(seconds / 86400);
+  const remSec = seconds % 86400;
+  const hours = Math.floor(remSec / 3600);
+  const minutes = Math.floor((remSec % 3600) / 60);
+  if (days > 0) return `${days}d${hours}h`;
+  if (hours > 0) return `${hours}h${minutes}m`;
+  return `${minutes}m`;
+}
+
+function splitQuotaKeySuffix(key) {
+  const lower = (key || '').toLowerCase();
+  const suffixes = [
+    { suffix: '-5h', window: '5h' },
+    { suffix: '-weekly', window: '7d' },
+    { suffix: '-daily', window: '24h' },
+    { suffix: '-monthly', window: '30d' },
+    { suffix: '-short', window: '5h' }
+  ];
+  for (const s of suffixes) {
+    if (lower.endsWith(s.suffix)) {
+      return { prefix: key.slice(0, key.length - s.suffix.length), window: s.window };
+    }
+  }
+  return { prefix: key, window: '' };
+}
+
+function matchQuotaAlias(rawKey) {
+  const { prefix, window } = splitQuotaKeySuffix(rawKey);
+  const prefixLower = prefix.toLowerCase();
+  let bestMatchLen = -1;
+  let bestItem = null;
+
+  for (const item of (activeAliases.quotas || [])) {
+    const kLower = (item.key || '').toLowerCase();
+    if (prefixLower === kLower || prefixLower.startsWith(kLower) || prefixLower.includes(kLower)) {
+      if (kLower.length > bestMatchLen) {
+        bestMatchLen = kLower.length;
+        bestItem = item;
+      }
+    }
+  }
+
+  if (bestItem) {
+    return {
+      name: bestItem.name,
+      shortName: bestItem.short_name,
+      window: window,
+      prefix: prefix,
+      matched: true
+    };
+  }
+
+  // Fallback: capitalize prefix
+  const capitalized = prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  const short = capitalized.length > 2 ? capitalized.slice(0, 2) : capitalized;
+  return {
+    name: capitalized,
+    shortName: short,
+    window: window,
+    prefix: prefix,
+    matched: false
+  };
+}
+
+function matchModelAlias(modelID, displayName) {
+  const target = (modelID || '').toLowerCase();
+  const disp = (displayName || '').toLowerCase();
+  for (const item of (activeAliases.models || [])) {
+    const kLower = (item.key || '').toLowerCase();
+    if ((target && target.includes(kLower)) || (disp && disp.includes(kLower))) {
+      return { name: item.name, shortName: item.short_name, matched: true };
+    }
+  }
+  return { name: displayName || modelID, shortName: '', matched: false };
+}
+
+function matchAccountAlias(email) {
+  if (!email) return { name: '', shortName: '', matched: false };
+  const lower = email.trim().toLowerCase();
+  for (const item of (activeAliases.accounts || [])) {
+    const kLower = (item.key || '').toLowerCase();
+    if (lower === kLower || lower.startsWith(kLower)) {
+      return { name: item.name, shortName: item.short_name, matched: true };
+    }
+  }
+  return { name: email, shortName: '', matched: false };
+}
+
+async function loadAliases() {
+  try {
+    const res = await fetch(getApiUrl('api/v1/config/aliases'), { headers: getAuthHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    activeAliases = {
+      quotas: data.quotas || [],
+      models: data.models || [],
+      accounts: data.accounts || []
+    };
+  } catch (e) {
+    console.error('[statusline] loadAliases error:', e);
+  }
 }
 
 function formatTokens(n) {
@@ -176,10 +297,13 @@ function renderDailyTokensTable(dailyTokens, forceRedraw = false) {
       const mCost = formatUSD(m.cost_usd);
       const subPrefix = i === 0 ? '↳ 明细' : '↳';
 
+      const matchedModel = matchModelAlias(m.model_id, m.display_name);
+      const displayModel = matchedModel.name || m.display_name || m.model_id;
+
       html += `
         <tr>
           <td class="sub-row-cell">${subPrefix}</td>
-          <td><span class="model-tag">${escapeHtml(m.display_name || m.model_id)}</span></td>
+          <td><span class="model-tag" title="${escapeHtml(m.model_id || '')}">${escapeHtml(displayModel)}</span></td>
           <td><span class="token-in">↑${mIn}</span></td>
           <td><span class="token-out">↓${mOut}</span></td>
           <td><span class="token-total">${mTot}</span></td>
@@ -278,58 +402,135 @@ function renderConcentricRing(pct, resetCountdown, resetInSec, isShortWindow, wi
   `;
 }
 
-// 提取指定 Provider (Gemini / Claude) 的配额窗口列表
-function extractProviderWindows(acc, providerType) {
-  const windows = [];
-  const isMatchKey = (key) => {
-    const k = (key || '').toLowerCase();
-    if (providerType === 'gemini') {
-      return k.includes('gemini');
-    }
-    return k.includes('claude') || k.includes('sonnet') || k.includes('opus') || k.includes('3p');
-  };
+// 提取并聚合账号下的所有 Provider 配额窗口（支持 Gemini, Argon, Claude 及任意动态前缀）
+function extractAllProviderGroups(acc) {
+  const groupsMap = new Map();
 
+  // 1. 优先从 acc.buckets 提取 (动态多 Provider 支持)
   if (acc.buckets && Array.isArray(acc.buckets) && acc.buckets.length > 0) {
-    const matched = acc.buckets.filter(b => isMatchKey(b.quota_key));
-    for (const b of matched) {
-      const isShort = b.reset_in_seconds <= 86400; // 1天以内视为短期窗口
-      const label = isShort ? '5h' : '7d';
-      windows.push({
+    for (const b of acc.buckets) {
+      const qKey = b.quota_key || b.prefix || '';
+      const alias = matchQuotaAlias(qKey);
+      const isShort = (alias.window === '5h') || (b.reset_in_seconds && b.reset_in_seconds <= 86400);
+      const label = alias.window || (isShort ? '5h' : '7d');
+
+      let grp = groupsMap.get(alias.name);
+      if (!grp) {
+        const lower = alias.name.toLowerCase();
+        let pillClass = 'other-pill';
+        if (lower.includes('gemini')) pillClass = 'gemini-pill';
+        else if (lower.includes('argon')) pillClass = 'argon-pill';
+        else if (lower.includes('claude') || lower.includes('3p')) pillClass = 'claude-pill';
+
+        grp = {
+          name: alias.name,
+          shortName: alias.shortName,
+          prefix: alias.prefix,
+          matched: alias.matched,
+          pillClass: pillClass,
+          windows: []
+        };
+        groupsMap.set(alias.name, grp);
+      }
+
+      grp.windows.push({
         label,
         isShort,
-        pct: b.remaining_pct != null ? b.remaining_pct : Math.round(b.remaining_fraction * 100),
-        countdown: b.reset_countdown || '--',
+        pct: b.remaining_pct != null ? b.remaining_pct : Math.round((b.remaining_fraction || 0) * 100),
+        countdown: b.reset_countdown || (b.reset_in_seconds ? formatDurationCompact(b.reset_in_seconds) : '--'),
         resetInSec: b.reset_in_seconds || 0
       });
     }
   }
 
-  // 若 buckets 未匹配到，从兼容字段 gemini / claude 中回退提取
-  if (windows.length === 0) {
-    const p = providerType === 'gemini' ? acc.gemini : acc.claude;
-    if (p) {
-      if (p.short_percentage != null || p.short_reset) {
-        windows.push({
+  // 2. 若 buckets 为空，从老字段 gemini / claude 回退兼容
+  if (groupsMap.size === 0) {
+    if (acc.gemini) {
+      const gWin = [];
+      if (acc.gemini.short_percentage != null || acc.gemini.short_reset) {
+        gWin.push({
           label: '5h',
           isShort: true,
-          pct: p.short_percentage != null ? p.short_percentage : 100,
-          countdown: p.short_reset || '--',
-          resetInSec: parseCountdownToSeconds(p.short_reset)
+          pct: acc.gemini.short_percentage != null ? acc.gemini.short_percentage : 100,
+          countdown: acc.gemini.short_reset || '--',
+          resetInSec: parseCountdownToSeconds(acc.gemini.short_reset)
         });
       }
-      if (p.long_percentage != null || p.long_reset) {
-        windows.push({
+      if (acc.gemini.long_percentage != null || acc.gemini.long_reset) {
+        gWin.push({
           label: '7d',
           isShort: false,
-          pct: p.long_percentage != null ? p.long_percentage : 100,
-          countdown: p.long_reset || '--',
-          resetInSec: parseCountdownToSeconds(p.long_reset)
+          pct: acc.gemini.long_percentage != null ? acc.gemini.long_percentage : 100,
+          countdown: acc.gemini.long_reset || '--',
+          resetInSec: parseCountdownToSeconds(acc.gemini.long_reset)
+        });
+      }
+      if (gWin.length > 0) {
+        groupsMap.set('Gemini', {
+          name: 'Gemini',
+          shortName: 'G',
+          prefix: 'gemini',
+          matched: true,
+          pillClass: 'gemini-pill',
+          windows: gWin
+        });
+      }
+    }
+
+    if (acc.claude) {
+      const cWin = [];
+      if (acc.claude.short_percentage != null || acc.claude.short_reset) {
+        cWin.push({
+          label: '5h',
+          isShort: true,
+          pct: acc.claude.short_percentage != null ? acc.claude.short_percentage : 100,
+          countdown: acc.claude.short_reset || '--',
+          resetInSec: parseCountdownToSeconds(acc.claude.short_reset)
+        });
+      }
+      if (acc.claude.long_percentage != null || acc.claude.long_reset) {
+        cWin.push({
+          label: '7d',
+          isShort: false,
+          pct: acc.claude.long_percentage != null ? acc.claude.long_percentage : 100,
+          countdown: acc.claude.long_reset || '--',
+          resetInSec: parseCountdownToSeconds(acc.claude.long_reset)
+        });
+      }
+      if (cWin.length > 0) {
+        groupsMap.set('Claude', {
+          name: 'Claude',
+          shortName: 'C',
+          prefix: 'claude',
+          matched: true,
+          pillClass: 'claude-pill',
+          windows: cWin
         });
       }
     }
   }
 
-  return windows;
+  // 排序：Gemini -> Argon -> Claude -> 其他
+  const priority = (name) => {
+    const l = name.toLowerCase();
+    if (l.includes('gemini')) return 1;
+    if (l.includes('argon')) return 2;
+    if (l.includes('claude') || l.includes('3p')) return 3;
+    return 10;
+  };
+
+  const groups = Array.from(groupsMap.values());
+  for (const g of groups) {
+    g.windows.sort((a, b) => a.resetInSec - b.resetInSec);
+  }
+  groups.sort((a, b) => {
+    const pA = priority(a.name);
+    const pB = priority(b.name);
+    if (pA !== pB) return pA - pB;
+    return a.name.localeCompare(b.name);
+  });
+
+  return groups;
 }
 
 // 3. 渲染按账号区分的模型配额池 (紧凑彩色同心双环仪表盘，带防重绘闪烁)
@@ -338,7 +539,7 @@ function renderAccountQuotas(accountQuotas, forceRedraw = false) {
   const tip = document.getElementById('quota-accounts-tip');
   if (!container) return;
 
-  const cacheKey = JSON.stringify(accountQuotas || []);
+  const cacheKey = JSON.stringify(accountQuotas || []) + '|' + JSON.stringify(activeAliases.quotas || []);
   if (!forceRedraw && lastRenderCache.quotas === cacheKey) {
     return; // 数据无变化，跳过 DOM 重绘以保持 hover 与动画
   }
@@ -355,6 +556,8 @@ function renderAccountQuotas(accountQuotas, forceRedraw = false) {
   let html = '';
   for (const acc of accountQuotas) {
     const email = acc.account_email || '未命名账号';
+    const accAlias = matchAccountAlias(email);
+    const displayEmail = accAlias.matched ? `${accAlias.name} (${email})` : email;
     const lastNode = acc.last_node_id ? `上报节点: ${escapeHtml(acc.last_node_id)}` : '';
     let updateTimeStr = '--';
     if (acc.updated_at) {
@@ -362,32 +565,20 @@ function renderAccountQuotas(accountQuotas, forceRedraw = false) {
       updateTimeStr = isNaN(d.getTime()) ? acc.updated_at : d.toLocaleTimeString();
     }
 
+    const providerGroups = extractAllProviderGroups(acc);
     let groupsHtml = '';
 
-    // Gemini Provider
-    const geminiWindows = extractProviderWindows(acc, 'gemini');
-    if (geminiWindows.length > 0) {
-      const rings = geminiWindows.map(w => renderConcentricRing(w.pct, w.countdown, w.resetInSec, w.isShort, w.label)).join('');
-      groupsHtml += `
-        <div class="quota-provider-group gemini-group">
-          <div class="provider-badge-row">
-            <span class="provider-pill gemini-pill">Gemini</span>
-          </div>
-          <div class="provider-rings-row">
-            ${rings}
-          </div>
-        </div>
-      `;
-    }
+    for (const grp of providerGroups) {
+      const rings = grp.windows.map(w => renderConcentricRing(w.pct, w.countdown, w.resetInSec, w.isShort, w.label)).join('');
+      const unmappedBtn = !grp.matched
+        ? `<button class="btn-quick-alias" title="点击为此配额前缀快速配置别名" onclick="quickAddAlias('quota', '${escapeHtml(grp.prefix)}', '${escapeHtml(grp.name)}', '${escapeHtml(grp.shortName)}')">+ 映射</button>`
+        : '';
 
-    // Claude Provider
-    const claudeWindows = extractProviderWindows(acc, 'claude');
-    if (claudeWindows.length > 0) {
-      const rings = claudeWindows.map(w => renderConcentricRing(w.pct, w.countdown, w.resetInSec, w.isShort, w.label)).join('');
       groupsHtml += `
-        <div class="quota-provider-group claude-group">
+        <div class="quota-provider-group ${escapeHtml(grp.pillClass.replace('-pill', '-group'))}">
           <div class="provider-badge-row">
-            <span class="provider-pill claude-pill">Claude</span>
+            <span class="provider-pill ${escapeHtml(grp.pillClass)}">${escapeHtml(grp.name)}</span>
+            ${unmappedBtn}
           </div>
           <div class="provider-rings-row">
             ${rings}
@@ -397,7 +588,7 @@ function renderAccountQuotas(accountQuotas, forceRedraw = false) {
     }
 
     if (!groupsHtml) {
-      groupsHtml = '<div class="empty-placeholder" style="padding: 10px 14px; font-size: 12px; margin: 0;">该账号暂无 Gemini / Claude 额度限制</div>';
+      groupsHtml = '<div class="empty-placeholder" style="padding: 10px 14px; font-size: 12px; margin: 0;">该账号暂无配额限制数据</div>';
     }
 
     html += `
@@ -405,7 +596,7 @@ function renderAccountQuotas(accountQuotas, forceRedraw = false) {
         <div class="account-card-header compact-header">
           <div class="account-badge-email">
             <span class="user-avatar-icon">👤</span>
-            <span class="account-email-text">${escapeHtml(email)}</span>
+            <span class="account-email-text" title="${escapeHtml(email)}">${escapeHtml(displayEmail)}</span>
           </div>
           <div class="account-node-meta">
             ${lastNode ? `<span>${escapeHtml(lastNode)}</span><span>·</span>` : ''}
@@ -421,6 +612,198 @@ function renderAccountQuotas(accountQuotas, forceRedraw = false) {
 
   container.innerHTML = html;
 }
+
+// 别名管理表格渲染与 CRUD 操作
+function renderAliasTable() {
+  const tbody = document.getElementById('alias-tbody');
+  const thKey = document.getElementById('alias-th-key');
+  if (!tbody) return;
+
+  if (thKey) {
+    if (currentAliasTab === 'quota') thKey.textContent = '匹配前缀 (如 gemini, 3p, gemini-argon)';
+    else if (currentAliasTab === 'model') thKey.textContent = '模型匹配标识 (如 gemini-3.8-flash, sonnet)';
+    else thKey.textContent = '账号邮箱 (如 dev@example.com)';
+  }
+
+  const listKey = currentAliasTab === 'quota' ? 'quotas' : currentAliasTab === 'model' ? 'models' : 'accounts';
+  const items = activeAliases[listKey] || [];
+
+  let html = '';
+
+  // 如果处于新增行状态，在顶部渲染输入框
+  if (addingNewAlias) {
+    html += `
+      <tr class="alias-edit-row">
+        <td><input id="input-new-key" class="alias-input" placeholder="输入匹配 Key / 前缀" value="${escapeHtml(newAliasPrefill.key || '')}"></td>
+        <td><input id="input-new-name" class="alias-input" placeholder="输入完整显示名 (宽屏 display_name)" value="${escapeHtml(newAliasPrefill.name || '')}"></td>
+        <td><input id="input-new-short" class="alias-input" placeholder="输入紧凑缩写 (窄屏 short_name)" value="${escapeHtml(newAliasPrefill.short || '')}"></td>
+        <td class="alias-actions-cell">
+          <button class="btn-action btn-sm btn-primary" onclick="confirmSaveNewAlias()">保存</button>
+          <button class="btn-action btn-sm" onclick="cancelAddAlias()">取消</button>
+        </td>
+      </tr>
+    `;
+  }
+
+  if (items.length === 0 && !addingNewAlias) {
+    html += `<tr><td colspan="4" class="table-empty">暂无 ${currentAliasTab} 映射规则，点击右上角「+ 新增映射」创建</td></tr>`;
+  } else {
+    for (const item of items) {
+      if (editingAliasKey === item.key) {
+        html += `
+          <tr class="alias-edit-row">
+            <td><code>${escapeHtml(item.key)}</code></td>
+            <td><input id="input-edit-name" class="alias-input" value="${escapeHtml(item.name)}"></td>
+            <td><input id="input-edit-short" class="alias-input" value="${escapeHtml(item.short_name || '')}"></td>
+            <td class="alias-actions-cell">
+              <button class="btn-action btn-sm btn-primary" onclick="confirmSaveEditAlias('${escapeHtml(item.key)}')">保存</button>
+              <button class="btn-action btn-sm" onclick="cancelEditAlias()">取消</button>
+            </td>
+          </tr>
+        `;
+      } else {
+        html += `
+          <tr>
+            <td><code>${escapeHtml(item.key)}</code></td>
+            <td><strong>${escapeHtml(item.name)}</strong></td>
+            <td><span class="badge-range">${escapeHtml(item.short_name || '--')}</span></td>
+            <td class="alias-actions-cell">
+              <button class="btn-action btn-sm" onclick="startEditAlias('${escapeHtml(item.key)}')">编辑</button>
+              <button class="btn-action btn-sm btn-danger" onclick="confirmDeleteAlias('${escapeHtml(item.key)}')">删除</button>
+            </td>
+          </tr>
+        `;
+      }
+    }
+  }
+
+  tbody.innerHTML = html;
+}
+
+window.startEditAlias = function(key) {
+  editingAliasKey = key;
+  addingNewAlias = false;
+  renderAliasTable();
+};
+
+window.cancelEditAlias = function() {
+  editingAliasKey = null;
+  renderAliasTable();
+};
+
+window.confirmSaveEditAlias = async function(key) {
+  const nameEl = document.getElementById('input-edit-name');
+  const shortEl = document.getElementById('input-edit-short');
+  const name = nameEl ? nameEl.value.trim() : '';
+  const shortName = shortEl ? shortEl.value.trim() : '';
+  if (!name) {
+    alert('完整显示名不能为空');
+    return;
+  }
+
+  try {
+    const res = await fetch(getApiUrl('api/v1/config/aliases'), {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify([{ category: currentAliasTab, key, name, short_name: shortName }])
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('保存失败: ' + (err.error || res.statusText));
+      return;
+    }
+    editingAliasKey = null;
+    await loadAliases();
+    renderAliasTable();
+    await refreshDashboard(true);
+  } catch (e) {
+    alert('请求异常: ' + e.message);
+  }
+};
+
+window.cancelAddAlias = function() {
+  addingNewAlias = false;
+  newAliasPrefill = { key: '', name: '', short: '' };
+  renderAliasTable();
+};
+
+window.confirmSaveNewAlias = async function() {
+  const keyEl = document.getElementById('input-new-key');
+  const nameEl = document.getElementById('input-new-name');
+  const shortEl = document.getElementById('input-new-short');
+  const key = keyEl ? keyEl.value.trim() : '';
+  const name = nameEl ? nameEl.value.trim() : '';
+  const shortName = shortEl ? shortEl.value.trim() : '';
+
+  if (!key || !name) {
+    alert('匹配 Key / 前缀 和 完整显示名 均不能为空');
+    return;
+  }
+
+  try {
+    const res = await fetch(getApiUrl('api/v1/config/aliases'), {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify([{ category: currentAliasTab, key, name, short_name: shortName }])
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('保存失败: ' + (err.error || res.statusText));
+      return;
+    }
+    addingNewAlias = false;
+    newAliasPrefill = { key: '', name: '', short: '' };
+    await loadAliases();
+    renderAliasTable();
+    await refreshDashboard(true);
+  } catch (e) {
+    alert('请求异常: ' + e.message);
+  }
+};
+
+window.confirmDeleteAlias = async function(key) {
+  if (!confirm(`确定要删除规则 [${key}] 吗？`)) return;
+  try {
+    const res = await fetch(getApiUrl(`api/v1/config/aliases?category=${currentAliasTab}&key=${encodeURIComponent(key)}`), {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('删除失败: ' + (err.error || res.statusText));
+      return;
+    }
+    await loadAliases();
+    renderAliasTable();
+    await refreshDashboard(true);
+  } catch (e) {
+    alert('请求异常: ' + e.message);
+  }
+};
+
+window.quickAddAlias = function(category, key, defaultName, defaultShort) {
+  currentAliasTab = category;
+  isAliasesOpen = true;
+  addingNewAlias = true;
+  editingAliasKey = null;
+  newAliasPrefill = { key, name: defaultName, short: defaultShort };
+
+  const modal = document.getElementById('alias-modal');
+  if (modal) {
+    modal.style.display = 'block';
+    modal.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  document.querySelectorAll('.alias-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.getAttribute('data-tab') === currentAliasTab);
+  });
+
+  renderAliasTable();
+  setTimeout(() => {
+    const inputName = document.getElementById('input-new-name');
+    if (inputName) inputName.focus();
+  }, 100);
+};
 
 // 4. 渲染终端会话列表 (支持点击卡片展开详情，防重绘闪烁)
 function renderSessions(sessions, forceRedraw = false) {
@@ -456,11 +839,17 @@ function renderSessions(sessions, forceRedraw = false) {
 
     const inTokens = formatTokens(sess.tokens ? sess.tokens.total_input_tokens : 0);
     const outTokens = formatTokens(sess.tokens ? sess.tokens.total_output_tokens : 0);
-    const modelName = sess.model ? (sess.model.display_name || sess.model.id) : 'Gemini';
+    const rawMId = sess.model ? (sess.model.id || '') : '';
+    const rawMDisp = sess.model ? (sess.model.display_name || '') : '';
+    const matchedM = matchModelAlias(rawMId, rawMDisp);
+    const modelName = matchedM.name || rawMDisp || rawMId || 'Gemini';
+
     const title = sess.conversation_title || sess.session_name || '默认终端会话';
     const email = (sess.account && sess.account.email) ? sess.account.email : '';
     const planTier = (sess.account && sess.account.plan_tier) ? sess.account.plan_tier : '';
-    const accountBadge = email ? `<span class="account-badge">👤 ${escapeHtml(email)}</span>` : '';
+    const accAlias = matchAccountAlias(email);
+    const displayAcc = accAlias.name || email;
+    const accountBadge = email ? `<span class="account-badge" title="${escapeHtml(email)}">👤 ${escapeHtml(displayAcc)}</span>` : '';
     const ctxPct = sess.context_window ? Math.round(sess.context_window.used_percentage) : 0;
     const ctxSize = sess.context_window && sess.context_window.context_window_size ? formatTokens(sess.context_window.context_window_size) : '1M';
     const cost = formatUSD(sess.cost_usd);
@@ -689,6 +1078,7 @@ function scheduleNextRefresh() {
 // 7. 事件绑定与初始化
 function init() {
   loadNodes();
+  loadAliases();
   refreshDashboard(true);
   scheduleNextRefresh();
 
@@ -718,6 +1108,7 @@ function init() {
       try {
         await fetch(getApiUrl('api/v1/refresh'), { method: 'POST' });
         await loadNodes();
+        await loadAliases();
         await refreshDashboard(true);
         if (isDebugOpen) await loadDebugData();
       } catch (e) {
@@ -728,6 +1119,59 @@ function init() {
       }
     });
   }
+
+  // 别名映射面板切换与操作
+  const btnToggleAliases = document.getElementById('btn-toggle-aliases');
+  const btnCloseAlias = document.getElementById('btn-close-alias');
+  const aliasModal = document.getElementById('alias-modal');
+  const btnAddAlias = document.getElementById('btn-add-alias');
+
+  if (btnToggleAliases && aliasModal) {
+    btnToggleAliases.addEventListener('click', async () => {
+      isAliasesOpen = !isAliasesOpen;
+      aliasModal.style.display = isAliasesOpen ? 'block' : 'none';
+      if (isAliasesOpen) {
+        await loadAliases();
+        renderAliasTable();
+        aliasModal.scrollIntoView({ behavior: 'smooth' });
+      }
+    });
+  }
+
+  if (btnCloseAlias && aliasModal) {
+    btnCloseAlias.addEventListener('click', () => {
+      isAliasesOpen = false;
+      aliasModal.style.display = 'none';
+    });
+  }
+
+  if (btnAddAlias) {
+    btnAddAlias.addEventListener('click', () => {
+      addingNewAlias = true;
+      editingAliasKey = null;
+      newAliasPrefill = { key: '', name: '', short: '' };
+      renderAliasTable();
+      setTimeout(() => {
+        const kInput = document.getElementById('input-new-key');
+        if (kInput) kInput.focus();
+      }, 50);
+    });
+  }
+
+  // 别名 Tab 切换
+  document.querySelectorAll('.alias-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const targetTab = tab.getAttribute('data-tab');
+      if (!targetTab || targetTab === currentAliasTab) return;
+      currentAliasTab = targetTab;
+      addingNewAlias = false;
+      editingAliasKey = null;
+      document.querySelectorAll('.alias-tab').forEach(t => {
+        t.classList.toggle('active', t.getAttribute('data-tab') === currentAliasTab);
+      });
+      renderAliasTable();
+    });
+  });
 
   // 调试面板切换
   const btnToggleDebug = document.getElementById('btn-toggle-debug');

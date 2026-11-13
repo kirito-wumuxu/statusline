@@ -15,8 +15,13 @@ func FormatModel(data *model.StatusLineData) string {
 	}
 
 	name := data.Model.DisplayName
-	if name == "" {
-		name = data.Model.ID
+	if name == "" || name == data.Model.ID {
+		aliasName, _ := MatchModelAlias(data.Model.ID, data.Model.DisplayName)
+		if aliasName != "" {
+			name = aliasName
+		} else if name == "" {
+			name = data.Model.ID
+		}
 	}
 
 	effort := strings.TrimSpace(data.Model.Effort)

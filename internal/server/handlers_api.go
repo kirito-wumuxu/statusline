@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -250,4 +251,85 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"ok","refreshed_count":0}`))
+}
+
+func (s *Server) handleGetAliases(w http.ResponseWriter, r *http.Request) {
+	aliases, err := s.store.GetDisplayAliases()
+	if err != nil {
+		http.Error(w, `{"error":"failed to get aliases"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(aliases)
+}
+
+func (s *Server) handleSaveAliases(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAPIKey(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	var items []model.DisplayAliasItem
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		http.Error(w, `{"error":"empty body"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Supports both single item or slice or grouped object
+	if err := json.Unmarshal(body, &items); err != nil {
+		var single model.DisplayAliasItem
+		if err2 := json.Unmarshal(body, &single); err2 == nil && single.Category != "" && single.Key != "" {
+			items = []model.DisplayAliasItem{single}
+		} else {
+			var grp model.DisplayAliasesConfig
+			if err3 := json.Unmarshal(body, &grp); err3 == nil {
+				for _, q := range grp.Quotas {
+					q.Category = "quota"
+					items = append(items, q)
+				}
+				for _, m := range grp.Models {
+					m.Category = "model"
+					items = append(items, m)
+				}
+				for _, a := range grp.Accounts {
+					a.Category = "account"
+					items = append(items, a)
+				}
+			} else {
+				http.Error(w, `{"error":"invalid json format"}`, http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	if err := s.store.SaveDisplayAliases(items); err != nil {
+		http.Error(w, `{"error":"failed to save aliases"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"ok"}`))
+}
+
+func (s *Server) handleDeleteAlias(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAPIKey(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	cat := r.URL.Query().Get("category")
+	key := r.URL.Query().Get("key")
+	if cat == "" || key == "" {
+		http.Error(w, `{"error":"category and key required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.DeleteDisplayAlias(cat, key); err != nil {
+		http.Error(w, `{"error":"failed to delete alias"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"ok"}`))
 }

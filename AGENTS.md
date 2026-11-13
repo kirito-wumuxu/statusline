@@ -54,6 +54,7 @@
 │   ├── node/                       # 跨平台硬件指纹 (Linux/Windows Machine-ID -> SHA256)
 │   ├── model/                      # 遥测模型、归一化与 UTF-8 乱码清洗器
 │   ├── render/                     # 终端 ANSI 状态栏渲染核心与自适应排版
+│   │   ├── aliases.go              # 实体别名映射引擎与最长前缀匹配 (配额/模型/账号)
 │   │   ├── colors.go               # ANSI 色彩与代码剥除
 │   │   ├── layout.go               # 模块化驱动排版与 Level 1~3 降级
 │   │   ├── segment_account.go      # 账号尖括号渲染与前缀截断
@@ -88,6 +89,7 @@
 - **`sessions`**：会话维度快照表，存储产品类型（`antigravity` / `claude_code`）、工作目录、Git 仓库元数据、最新累计 Token、费用与活跃时间。通过 `ON CONFLICT DO UPDATE` 幂等刷新。
 - **`telemetry_events`**：瞬时流水明细表，记录每次问答触发的 Token 消耗、Context Window 使用率、缓存命中率及原始 JSON 备份。
 - **`account_quotas`**：多账号配额实时状态表，聚合记录各账号的 Gemini / Claude 配额余量与冷却重置时间。
+- **`display_aliases`**：显示别名映射表（`category`, `alias_key`, `display_name`, `short_name`），纯 Web 界面管理 + SQLite 持久化（服务端 YAML 零配置），客户端 `statusline init` 时自动拉取同步。
 
 ---
 

@@ -3,6 +3,8 @@ package installer
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,5 +204,49 @@ func TestInPlaceBinaryResolution(t *testing.T) {
 	}
 	if !filepath.IsAbs(cmdVal) {
 		t.Errorf("expected absolute command path, got %s", cmdVal)
+	}
+}
+
+func TestSyncAliasesFromRemote(t *testing.T) {
+	// Create mock server
+	aliasesJSON := `{
+		"quotas": [{"key": "gemini", "name": "Gemini", "short_name": "G"}],
+		"models": [{"key": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "short_name": "Flash"}],
+		"accounts": [{"key": "test@example.com", "name": "Tester", "short_name": "Test"}]
+	}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/api/v1/config/aliases") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(aliasesJSON))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	// Temp dir for client.yaml
+	tmpDir := t.TempDir()
+	originalWD, _ := os.Getwd()
+	_ = os.Chdir(tmpDir)
+	defer os.Chdir(originalWD)
+
+	clientYaml := filepath.Join(tmpDir, "client.yaml")
+	initialContent := "report:\n  endpoint: " + ts.URL + "/api/v1/report\n"
+	_ = os.WriteFile(clientYaml, []byte(initialContent), 0644)
+
+	var out bytes.Buffer
+	SyncAliasesFromRemote(&out)
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "成功从服务端同步别名映射") {
+		t.Errorf("expected sync success message, got: %s", outStr)
+	}
+
+	data, err := os.ReadFile(clientYaml)
+	if err != nil {
+		t.Fatalf("failed to read updated client.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "short_name: Flash") {
+		t.Errorf("expected client.yaml to contain updated aliases, got: %s", string(data))
 	}
 }

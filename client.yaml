@@ -38,6 +38,38 @@ display:
     - tokens
     - quota
 
+# 显示别名与窄屏缩写映射（执行 statusline init 可从 statusline-server 自动拉取更新）
+aliases:
+  # 1. 配额实体映射（剥离 -5h/-weekly 等时间后缀，按前缀最长匹配）
+  quotas:
+    - key: "gemini"              # 匹配 gemini-5h, gemini-weekly 等
+      name: "Gemini"             # 宽屏终端名称
+      short_name: "G"            # 空间紧凑缩写标签 (G: 100%)
+    - key: "gemini-argon"        # 匹配 gemini-argon-wtu-weekly 特权池
+      name: "Argon"              # 宽屏终端名称
+      short_name: "Ar"           # 空间紧凑缩写标签 (Ar: 100%)
+    - key: "3p"                  # 匹配 3p-5h, 3p-weekly 第三方池
+      name: "Claude"
+      short_name: "C"
+
+  # 2. 模型实体映射（匹配模型 ID，用于宽屏名称与紧凑模式缩写）
+  models:
+    - key: "gemini-3.8-flash"
+      name: "Gemini 3.8 Flash"
+      short_name: "Flash"
+    - key: "gemini-3.8-pro"
+      name: "Gemini 3.8 Pro"
+      short_name: "Pro"
+    - key: "claude-3-7-sonnet"
+      name: "Claude 3.7 Sonnet"
+      short_name: "Sonnet"
+    - key: "claude-opus"
+      name: "Claude Opus"
+      short_name: "Opus"
+
+  # 3. 账号实体映射（匹配登录账号，用于宽屏与窄屏缩写）
+  accounts: []
+
 # 日志设置（客户端默认关闭，不影响终端状态栏输出）
 # 日志文件固定写入可执行文件所在目录的 statusline.log
 logging:

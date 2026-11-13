@@ -138,19 +138,24 @@ func formatModelCompact(data *model.StatusLineData) string {
 	if name == "" {
 		name = data.Model.ID
 	}
-	nameLower := strings.ToLower(name)
 
-	short := "Flash"
-	if strings.Contains(nameLower, "pro") {
-		short = "Pro"
-	} else if strings.Contains(nameLower, "sonnet") {
-		short = "Sonnet"
-	} else if strings.Contains(nameLower, "opus") {
-		short = "Opus"
-	} else if strings.Contains(nameLower, "haiku") {
-		short = "Haiku"
-	} else if strings.Contains(nameLower, "flash") {
+	_, shortName := MatchModelAlias(data.Model.ID, data.Model.DisplayName)
+	short := shortName
+
+	if short == "" {
+		nameLower := strings.ToLower(name)
 		short = "Flash"
+		if strings.Contains(nameLower, "pro") {
+			short = "Pro"
+		} else if strings.Contains(nameLower, "sonnet") {
+			short = "Sonnet"
+		} else if strings.Contains(nameLower, "opus") {
+			short = "Opus"
+		} else if strings.Contains(nameLower, "haiku") {
+			short = "Haiku"
+		} else if strings.Contains(nameLower, "flash") {
+			short = "Flash"
+		}
 	}
 
 	if data.Model.Effort != "" && !strings.Contains(strings.ToLower(short), strings.ToLower(data.Model.Effort)) {
@@ -205,36 +210,28 @@ func formatContextCompact(data *model.StatusLineData) string {
 }
 
 func formatQuotaCompact(data *model.StatusLineData, singleBucketOnly bool) string {
-	geminiBuckets, claudeBuckets := extractProviderBuckets(data)
-	if len(geminiBuckets) == 0 && len(claudeBuckets) == 0 {
+	groups := extractProviderGroups(data)
+	if len(groups) == 0 {
 		return ""
 	}
 
 	var parts []string
-	if len(geminiBuckets) > 0 {
-		b := geminiBuckets[0]
-		dur := FormatDurationCompact(b.bucket.ResetInSeconds)
-		gStr := formatBucketItem(b.remaining, dur)
-		if !singleBucketOnly && len(geminiBuckets) > 1 {
-			b2 := geminiBuckets[1]
-			dur2 := FormatDurationCompact(b2.bucket.ResetInSeconds)
-			gStr = fmt.Sprintf("%s %s", gStr, formatBucketItem(b2.remaining, dur2))
+	for _, g := range groups {
+		if len(g.buckets) == 0 {
+			continue
 		}
-		gLabel := fmt.Sprintf("%sG:%s", AnsiBrightCyan, AnsiReset)
-		parts = append(parts, fmt.Sprintf("%s %s", gLabel, gStr))
-	}
-
-	if len(claudeBuckets) > 0 {
-		b := claudeBuckets[0]
-		dur := FormatDurationCompact(b.bucket.ResetInSeconds)
-		cStr := formatBucketItem(b.remaining, dur)
-		if !singleBucketOnly && len(claudeBuckets) > 1 {
-			b2 := claudeBuckets[1]
-			dur2 := FormatDurationCompact(b2.bucket.ResetInSeconds)
-			cStr = fmt.Sprintf("%s %s", cStr, formatBucketItem(b2.remaining, dur2))
+		var bItems []string
+		limit := 2
+		if singleBucketOnly || len(g.buckets) < 2 {
+			limit = 1
 		}
-		cLabel := fmt.Sprintf("%sC:%s", AnsiOrange, AnsiReset)
-		parts = append(parts, fmt.Sprintf("%s %s", cLabel, cStr))
+		for i := 0; i < limit && i < len(g.buckets); i++ {
+			b := g.buckets[i]
+			dur := FormatDurationCompact(b.bucket.ResetInSeconds)
+			bItems = append(bItems, formatBucketItem(b.remaining, dur))
+		}
+		label := fmt.Sprintf("%s%s:%s", g.color, g.shortName, AnsiReset)
+		parts = append(parts, fmt.Sprintf("%s %s", label, strings.Join(bItems, " ")))
 	}
 
 	sep := fmt.Sprintf(" %s|%s ", AnsiDarkGray, AnsiReset)
