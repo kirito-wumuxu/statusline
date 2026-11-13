@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"statusline/internal/model"
 	"statusline/internal/node"
@@ -276,5 +277,90 @@ func TestAccountAliasSortOrder(t *testing.T) {
 	}
 	if groups[2].AccountEmail != "charlie@example.com" {
 		t.Errorf("expected #3 group to be charlie@example.com, got %s", groups[2].AccountEmail)
+	}
+}
+
+func TestMultiDayTokenConsumptionDelta(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "delta_tokens_test.db")
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	n := node.GetNodeInfo("node_delta", "1.0.0")
+
+	// Helper to ingest event with custom timestamp
+	ingestEventWithTime := func(sessionID, modelID string, inTokens, outTokens int64, timeStr string) {
+		payload := fmt.Sprintf(`{
+			"product": "antigravity",
+			"session_id": "%s",
+			"cwd": "/workspace",
+			"model": {"id": "%s", "display_name": "%s"},
+			"context_window": {"total_input_tokens": %d, "total_output_tokens": %d, "context_window_size": 1048576}
+		}`, sessionID, modelID, modelID, inTokens, outTokens)
+		env, _, err := model.ParseAndNormalize([]byte(payload), n)
+		if err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		env.ReportedAt = timeStr
+		if err := store.Ingest(env); err != nil {
+			t.Fatalf("failed to ingest: %v", err)
+		}
+	}
+
+	// Day 1 (yesterday): Session starts, reaches 2000 in, 1200 out
+	tYesterday := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02T15:04:05Z")
+	tYesterdayDate := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02")
+	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 1000, 500, tYesterday)
+	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 2000, 1200, tYesterday)
+
+	// Day 2 (today): Continues same session, reaches 2500 in (+500), 1600 out (+400)
+	tToday := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	tTodayDate := time.Now().UTC().Format("2006-01-02")
+	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 2500, 1600, tToday)
+
+	// Ingest an idle event with same tokens on today (should not inflate delta)
+	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 2500, 1600, tToday)
+
+	// Query GetDailyModelTokens
+	daily, err := store.GetDailyModelTokens(7)
+	if err != nil {
+		t.Fatalf("failed to get daily tokens: %v", err)
+	}
+
+	var todaySummary, yesterdaySummary *DailyTokensSummary
+	for i := range daily {
+		if daily[i].Date == tTodayDate {
+			todaySummary = &daily[i]
+		}
+		if daily[i].Date == tYesterdayDate {
+			yesterdaySummary = &daily[i]
+		}
+	}
+
+	if yesterdaySummary == nil {
+		t.Fatalf("expected summary for yesterday %s, got none", tYesterdayDate)
+	}
+	if yesterdaySummary.TotalInputTokens != 2000 || yesterdaySummary.TotalOutputTokens != 1200 || yesterdaySummary.TotalTokens != 3200 {
+		t.Errorf("yesterday expected 2000 in, 1200 out, 3200 total; got in=%d, out=%d, total=%d",
+			yesterdaySummary.TotalInputTokens, yesterdaySummary.TotalOutputTokens, yesterdaySummary.TotalTokens)
+	}
+
+	if todaySummary == nil {
+		t.Fatalf("expected summary for today %s, got none", tTodayDate)
+	}
+	// Today should ONLY count the delta (+500 in, +400 out = 900 total)!
+	if todaySummary.TotalInputTokens != 500 || todaySummary.TotalOutputTokens != 400 || todaySummary.TotalTokens != 900 {
+		t.Errorf("today expected delta 500 in, 400 out, 900 total; got in=%d, out=%d, total=%d",
+			todaySummary.TotalInputTokens, todaySummary.TotalOutputTokens, todaySummary.TotalTokens)
+	}
+
+	// Total across yesterday + today should equal the session's total (2500 in + 1600 out = 4100)!
+	sumAcrossDays := yesterdaySummary.TotalTokens + todaySummary.TotalTokens
+	if sumAcrossDays != 4100 {
+		t.Errorf("expected sum across days to be 4100, got %d", sumAcrossDays)
 	}
 }

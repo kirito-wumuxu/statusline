@@ -175,6 +175,13 @@ func normalizeAGY(agy *StatusLineData) NormalizedData {
 		Quotas:              make(map[string]QuotaItem),
 	}
 
+	if agy.ContextWindow.CurrentUsage != nil {
+		norm.CurrentInputTokens = agy.ContextWindow.CurrentUsage.InputTokens
+		norm.CurrentOutputTokens = agy.ContextWindow.CurrentUsage.OutputTokens
+		norm.CacheReadTokens = agy.ContextWindow.CurrentUsage.CacheReadInputTokens
+		norm.CacheCreationTokens = agy.ContextWindow.CurrentUsage.CacheCreationInputTokens
+	}
+
 	if norm.ContextWindowSize == 0 {
 		norm.ContextWindowSize = 1048576
 	}

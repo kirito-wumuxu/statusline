@@ -24,12 +24,20 @@ type StatusLineData struct {
 	Cost              CostInfo               `json:"cost,omitempty"`
 }
 
+type CurrentUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+}
+
 type ContextWindowInfo struct {
-	TotalInputTokens    int64   `json:"total_input_tokens"`
-	TotalOutputTokens   int64   `json:"total_output_tokens"`
-	ContextWindowSize   int64   `json:"context_window_size"`
-	UsedPercentage      float64 `json:"used_percentage"`
-	RemainingPercentage float64 `json:"remaining_percentage"`
+	TotalInputTokens    int64         `json:"total_input_tokens"`
+	TotalOutputTokens   int64         `json:"total_output_tokens"`
+	ContextWindowSize   int64         `json:"context_window_size"`
+	UsedPercentage      float64       `json:"used_percentage"`
+	RemainingPercentage float64       `json:"remaining_percentage"`
+	CurrentUsage        *CurrentUsage `json:"current_usage,omitempty"`
 }
 
 func (c *ContextWindowInfo) UnmarshalJSON(b []byte) error {

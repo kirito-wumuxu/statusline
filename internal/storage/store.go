@@ -457,7 +457,7 @@ type DailyModelToken struct {
 	OutputTokens int64   `json:"output_tokens"`
 	TotalTokens  int64   `json:"total_tokens"`
 	Percentage   float64 `json:"percentage"`
-	CostUSD      float64 `json:"cost_usd"`
+	CostUSD      float64 `json:"cost_usd,omitempty"`
 }
 
 // DailyTokensSummary aggregates model token consumption for a single day.
@@ -466,7 +466,7 @@ type DailyTokensSummary struct {
 	TotalInputTokens  int64             `json:"total_input_tokens"`
 	TotalOutputTokens int64             `json:"total_output_tokens"`
 	TotalTokens       int64             `json:"total_tokens"`
-	TotalCostUSD      float64           `json:"total_cost_usd"`
+	TotalCostUSD      float64           `json:"total_cost_usd,omitempty"`
 	Models            []DailyModelToken `json:"models"`
 }
 
@@ -477,28 +477,38 @@ func (s *Store) GetDailyModelTokens(days int) ([]DailyTokensSummary, error) {
 	}
 
 	query := `
-	WITH session_daily AS (
+	WITH daily_session_bounds AS (
 		SELECT 
-			strftime('%Y-%m-%d', reported_at) AS day,
-			model_id,
-			COALESCE(model_display_name, model_id) AS display_name,
-			session_id,
-			MAX(total_input_tokens) AS max_in,
-			MAX(total_output_tokens) AS max_out,
-			MAX(total_cost_usd) AS max_cost
-		FROM telemetry_events
-		WHERE reported_at >= datetime('now', '-' || ? || ' days')
-		GROUP BY day, model_id, session_id
+			strftime('%Y-%m-%d', e.reported_at) AS day,
+			e.session_id,
+			e.model_id,
+			COALESCE(e.model_display_name, e.model_id) AS display_name,
+			MAX(e.total_input_tokens) AS max_in,
+			MAX(e.total_output_tokens) AS max_out,
+			COALESCE((
+				SELECT MAX(e2.total_input_tokens) 
+				FROM telemetry_events e2 
+				WHERE e2.session_id = e.session_id 
+				  AND strftime('%Y-%m-%d', e2.reported_at) < strftime('%Y-%m-%d', e.reported_at)
+			), 0) AS base_in,
+			COALESCE((
+				SELECT MAX(e2.total_output_tokens) 
+				FROM telemetry_events e2 
+				WHERE e2.session_id = e.session_id 
+				  AND strftime('%Y-%m-%d', e2.reported_at) < strftime('%Y-%m-%d', e.reported_at)
+			), 0) AS base_out
+		FROM telemetry_events e
+		WHERE e.reported_at >= datetime('now', '-' || ? || ' days')
+		GROUP BY day, e.model_id, e.session_id
 	)
 	SELECT 
 		day,
 		model_id,
 		display_name,
-		COALESCE(SUM(max_in), 0) AS input_tokens,
-		COALESCE(SUM(max_out), 0) AS output_tokens,
-		COALESCE(SUM(max_in + max_out), 0) AS total_tokens,
-		COALESCE(SUM(max_cost), 0.0) AS cost_usd
-	FROM session_daily
+		COALESCE(SUM(CASE WHEN max_in > base_in THEN max_in - base_in ELSE 0 END), 0) AS in_tokens,
+		COALESCE(SUM(CASE WHEN max_out > base_out THEN max_out - base_out ELSE 0 END), 0) AS out_tokens,
+		COALESCE(SUM((CASE WHEN max_in > base_in THEN max_in - base_in ELSE 0 END) + (CASE WHEN max_out > base_out THEN max_out - base_out ELSE 0 END)), 0) AS total_tokens
+	FROM daily_session_bounds
 	GROUP BY day, model_id
 	ORDER BY day DESC, total_tokens DESC;`
 
@@ -514,9 +524,8 @@ func (s *Store) GetDailyModelTokens(days int) ([]DailyTokensSummary, error) {
 	for rows.Next() {
 		var day, modelID, displayName string
 		var inTokens, outTokens, totalTokens int64
-		var costUSD float64
 
-		if err := rows.Scan(&day, &modelID, &displayName, &inTokens, &outTokens, &totalTokens, &costUSD); err != nil {
+		if err := rows.Scan(&day, &modelID, &displayName, &inTokens, &outTokens, &totalTokens); err != nil {
 			return nil, err
 		}
 
@@ -533,7 +542,6 @@ func (s *Store) GetDailyModelTokens(days int) ([]DailyTokensSummary, error) {
 		summary.TotalInputTokens += inTokens
 		summary.TotalOutputTokens += outTokens
 		summary.TotalTokens += totalTokens
-		summary.TotalCostUSD += costUSD
 
 		summary.Models = append(summary.Models, DailyModelToken{
 			ModelID:      modelID,
@@ -541,7 +549,6 @@ func (s *Store) GetDailyModelTokens(days int) ([]DailyTokensSummary, error) {
 			InputTokens:  inTokens,
 			OutputTokens: outTokens,
 			TotalTokens:  totalTokens,
-			CostUSD:      costUSD,
 		})
 	}
 

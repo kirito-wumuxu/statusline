@@ -834,7 +834,6 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
     grp.totalIn += r.input_tokens || 0;
     grp.totalOut += r.output_tokens || 0;
     grp.totalTokens += r.total_tokens || 0;
-    grp.totalCost += r.cost_usd || 0;
     grp.models.push(r);
   }
 
@@ -857,7 +856,6 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
           <div class="text-[11px] text-slate-400 mb-1">当天总占比 100%</div>
           <div class="bar-bg"><div class="bar-fill" style="width: 100%; background-color: var(--accent-sky);"></div></div>
         </td>
-        <td class="py-3 px-4 text-right text-amber-400 font-bold">${formatUSD(grp.totalCost)}</td>
       </tr>
     `;
 
@@ -881,7 +879,6 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
             <div class="text-[11px] text-slate-400 mb-0.5">${pct}%</div>
             <div class="bar-bg"><div class="bar-fill" style="width: ${pct}%;"></div></div>
           </td>
-          <td class="py-2.5 px-4 text-right text-slate-400">${formatUSD(m.cost_usd)}</td>
         </tr>
       `;
     }
@@ -1351,8 +1348,10 @@ async function refreshDashboard(forceRedraw = false) {
     setHtml('val-tokens-today-detail', `↑${formatTokens(todayInput)}<br>↓${formatTokens(todayOutput)}`);
 
     const totalTokens = overview.total_tokens || overview.tokens_total || 0;
+    const totalInput = overview.total_input_tokens || 0;
+    const totalOutput = overview.total_output_tokens || 0;
     setText('val-tokens-total', formatTokens(totalTokens));
-    setText('val-cost-total', formatUSD(overview.total_cost_usd || overview.cost_total_usd || 0));
+    setHtml('val-tokens-total-detail', `↑${formatTokens(totalInput)}<br>↓${formatTokens(totalOutput)}`);
 
     setText('val-nodes', overview.active_nodes || 0);
 

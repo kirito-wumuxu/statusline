@@ -50,7 +50,7 @@
             <div class="text-[11px] text-slate-400">历史累计 Token</div>
             <div class="text-xl font-bold text-white mono" id="val-tokens-total">0</div>
           </div>
-          <div class="text-[11px] text-slate-500 text-right" id="val-cost-total">$0.00</div>
+          <div class="text-[10px] text-slate-400 text-right mono" id="val-tokens-total-detail">↑0<br>↓0</div>
         </div>
         <div onclick="switchMainTab('tab-sessions')" class="sub-card-bg px-3.5 py-2 rounded-xl flex items-center justify-between cursor-pointer hover:border-sky-500/50 transition" title="查看关联物理节点">
           <div>
@@ -178,12 +178,11 @@
                 <th class="py-3 px-4" style="width: 130px;">输出 Token (↓)</th>
                 <th class="py-3 px-4" style="width: 140px;">总计 Token</th>
                 <th class="py-3 px-4 w-64">消耗占比</th>
-                <th class="py-3 px-4 text-right" style="width: 100px;">估算费用</th>
               </tr>
             </thead>
             <tbody id="daily-tokens-tbody" class="divide-y divide-slate-800/60 mono">
               <tr>
-                <td colspan="7" class="py-8 text-center text-slate-500">数据加载中...</td>
+                <td colspan="6" class="py-8 text-center text-slate-500">数据加载中...</td>
               </tr>
             </tbody>
           </table>
