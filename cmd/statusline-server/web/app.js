@@ -9,10 +9,11 @@ let selectedNodeId = '';
 let isAliasesOpen = false;
 let currentAliasTab = 'quota'; // 'quota' | 'model' | 'account'
 let addingNewAlias = false;
-let newAliasPrefill = { key: '', name: '', short: '' };
+let newAliasPrefill = { key: '', name: '', short: '', sort: 0 };
 let editingAliasKey = null;
 let activeAliases = { quotas: [], models: [], accounts: [] };
 let knownNodes = [];
+let lastRawQuotas = [];
 const expandedSessionIds = new Set();
 const rawReportsCache = new Map();
 let currentDebugId = null;
@@ -155,10 +156,15 @@ function matchAccountAlias(email) {
   for (const item of (activeAliases.accounts || [])) {
     const kLower = (item.key || '').toLowerCase();
     if (eLower === kLower || eLower.startsWith(kLower)) {
-      return { name: item.name, shortName: item.short_name, matched: true };
+      return {
+        name: item.name,
+        shortName: item.short_name,
+        sortOrder: item.sort_order || 0,
+        matched: true
+      };
     }
   }
-  return { name: email, shortName: '', matched: false };
+  return { name: email, shortName: '', sortOrder: 0, matched: false };
 }
 
 async function loadAliases() {
@@ -169,7 +175,12 @@ async function loadAliases() {
     activeAliases = {
       quotas: data.quotas || [],
       models: data.models || [],
-      accounts: data.accounts || []
+      accounts: (data.accounts || []).sort((a, b) => {
+        const orderA = a.sort_order > 0 ? a.sort_order : 999999;
+        const orderB = b.sort_order > 0 ? b.sort_order : 999999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (a.key || '').localeCompare(b.key || '');
+      })
     };
   } catch (e) {
     console.error('[statusline] loadAliases error:', e);
@@ -297,8 +308,19 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
     return;
   }
   lastRenderCache.quotas = cacheKey;
+  lastRawQuotas = groupedAccounts || [];
 
-  const accounts = groupedAccounts || [];
+  const rawList = groupedAccounts || [];
+  const accounts = [...rawList].sort((a, b) => {
+    const aliasA = matchAccountAlias(a.account_email || '');
+    const aliasB = matchAccountAlias(b.account_email || '');
+    const orderA = aliasA.sortOrder > 0 ? aliasA.sortOrder : 999999;
+    const orderB = aliasB.sortOrder > 0 ? aliasB.sortOrder : 999999;
+    if (orderA !== orderB) return orderA - orderB;
+    const timeA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+    const timeB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+    return timeB - timeA;
+  });
   setText('badge-quota-count', `${accounts.length} 账号`);
   setText('val-accounts', accounts.length);
   setText('val-accounts-sub', `${accounts.length} 个上报账号`);
@@ -465,12 +487,17 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
       `;
     }
 
+    const sortBadge = accAlias.sortOrder > 0 ? `<span class="px-2 py-0.5 rounded text-xs bg-amber-950 text-amber-400 border border-amber-800/60 mono font-bold shrink-0">#${accAlias.sortOrder}</span>` : '';
+
     html += `
       <div class="account-quota-card ${spanClass} shadow-lg">
         <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-3 w-full">
-          <span class="text-amber-400 font-bold text-base flex items-center gap-2 truncate max-w-[280px]" title="${escapeHtml(displayEmail)}">
-            👤 ${escapeHtml(displayEmail)}
-          </span>
+          <div class="flex items-center gap-2 truncate max-w-[320px]">
+            ${sortBadge}
+            <span class="text-amber-400 font-bold text-base truncate" title="${escapeHtml(displayEmail)}">
+              👤 ${escapeHtml(displayEmail)}
+            </span>
+          </div>
           <span class="text-xs text-slate-400 mono bg-slate-900/90 px-2.5 py-1 rounded shrink-0">${nodeId} · ${updatedStr}</span>
         </div>
         <div class="grid ${insideColsClass} gap-4 flex-1 items-stretch">
@@ -1004,11 +1031,16 @@ function renderAliasTable() {
   let html = '';
 
   if (addingNewAlias) {
+    const sortInputHtml = currentAliasTab === 'account'
+      ? `<input id="input-new-sort" type="number" min="0" max="999" class="alias-input text-center" placeholder="排序" value="${newAliasPrefill.sort || 0}">`
+      : `<span class="text-slate-500">--</span>`;
+
     html += `
       <tr class="bg-sky-950/20">
         <td class="p-2.5"><input id="input-new-key" class="alias-input" placeholder="输入匹配 Key / 前缀" value="${escapeHtml(newAliasPrefill.key || '')}"></td>
         <td class="p-2.5"><input id="input-new-name" class="alias-input" placeholder="输入完整显示名 (宽屏 display_name)" value="${escapeHtml(newAliasPrefill.name || '')}"></td>
         <td class="p-2.5"><input id="input-new-short" class="alias-input" placeholder="输入紧凑缩写 (窄屏 short_name)" value="${escapeHtml(newAliasPrefill.short || '')}"></td>
+        <td class="p-2.5 text-center">${sortInputHtml}</td>
         <td class="p-2.5 text-right space-x-1">
           <button class="btn-action btn-sm btn-primary" onclick="confirmSaveNewAlias()">保存</button>
           <button class="btn-action btn-sm" onclick="cancelAddAlias()">取消</button>
@@ -1018,15 +1050,20 @@ function renderAliasTable() {
   }
 
   if (items.length === 0 && !addingNewAlias) {
-    html += `<tr><td colspan="4" class="py-8 text-center text-slate-500">暂无 ${currentAliasTab} 映射规则，点击右上角「+ 新增映射」创建</td></tr>`;
+    html += `<tr><td colspan="5" class="py-8 text-center text-slate-500">暂无 ${currentAliasTab} 映射规则，点击右上角「+ 新增映射」创建</td></tr>`;
   } else {
     for (const item of items) {
       if (editingAliasKey === item.key) {
+        const sortInputHtml = currentAliasTab === 'account'
+          ? `<input id="input-edit-sort" type="number" min="0" max="999" class="alias-input text-center" value="${item.sort_order || 0}">`
+          : `<span class="text-slate-500">--</span>`;
+
         html += `
           <tr class="bg-sky-950/20">
             <td class="p-2.5"><code>${escapeHtml(item.key)}</code></td>
             <td class="p-2.5"><input id="input-edit-name" class="alias-input" value="${escapeHtml(item.name)}"></td>
             <td class="p-2.5"><input id="input-edit-short" class="alias-input" value="${escapeHtml(item.short_name || '')}"></td>
+            <td class="p-2.5 text-center">${sortInputHtml}</td>
             <td class="p-2.5 text-right space-x-1">
               <button class="btn-action btn-sm btn-primary" onclick="confirmSaveEditAlias('${escapeHtml(item.key)}')">保存</button>
               <button class="btn-action btn-sm" onclick="cancelEditAlias()">取消</button>
@@ -1034,11 +1071,23 @@ function renderAliasTable() {
           </tr>
         `;
       } else {
+        let sortCellHtml = `<span class="text-slate-500 mono">${item.sort_order > 0 ? '#' + item.sort_order : '--'}</span>`;
+        if (currentAliasTab === 'account') {
+          sortCellHtml = `
+            <div class="inline-flex items-center gap-1.5 bg-slate-900/80 px-2 py-0.5 rounded-lg border border-slate-800">
+              <button class="btn-action btn-xs text-sky-400 hover:text-white" onclick="adjustAccountOrder('${escapeHtml(item.key)}', -1)" title="上移 (排在前面)">▲</button>
+              <span class="mono text-xs font-bold ${item.sort_order > 0 ? 'text-amber-400' : 'text-slate-500'}" style="min-width: 24px; text-align: center;">${item.sort_order > 0 ? '#' + item.sort_order : '--'}</span>
+              <button class="btn-action btn-xs text-sky-400 hover:text-white" onclick="adjustAccountOrder('${escapeHtml(item.key)}', 1)" title="下移 (排在后面)">▼</button>
+            </div>
+          `;
+        }
+
         html += `
           <tr class="hover:bg-slate-800/40 transition">
             <td class="py-2.5 px-3"><code>${escapeHtml(item.key)}</code></td>
             <td class="py-2.5 px-3"><strong>${escapeHtml(item.name)}</strong></td>
             <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-slate-800 text-sky-400 mono">${escapeHtml(item.short_name || '--')}</span></td>
+            <td class="py-2.5 px-3 text-center">${sortCellHtml}</td>
             <td class="py-2.5 px-3 text-right space-x-1">
               <button class="btn-action btn-sm" onclick="startEditAlias('${escapeHtml(item.key)}')">编辑</button>
               <button class="btn-action btn-sm btn-danger" onclick="confirmDeleteAlias('${escapeHtml(item.key)}')">删除</button>
@@ -1050,7 +1099,80 @@ function renderAliasTable() {
   }
 
   tbody.innerHTML = html;
+
+  // 账号未配置提示与一键快捷添加
+  const tipEl = document.getElementById('alias-extra-tip');
+  if (tipEl) {
+    if (currentAliasTab === 'account' && Array.isArray(lastRawQuotas) && lastRawQuotas.length > 0) {
+      const mappedKeys = new Set((activeAliases.accounts || []).map(a => (a.key || '').toLowerCase()));
+      const unmapped = [];
+      for (const q of lastRawQuotas) {
+        const email = (q.account_email || '').trim();
+        if (email && !mappedKeys.has(email.toLowerCase()) && !unmapped.includes(email)) {
+          unmapped.push(email);
+        }
+      }
+      if (unmapped.length > 0) {
+        const nextOrder = (activeAliases.accounts || []).length + 1;
+        tipEl.innerHTML = `
+          <div class="mt-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div class="text-slate-400">检测到活跃上报账号尚未配置别名与排序：<b class="text-amber-400">${escapeHtml(unmapped.join(', '))}</b></div>
+            <button class="btn-action btn-sm text-sky-400 border border-sky-800/60" onclick="quickAddAlias('account', '${escapeHtml(unmapped[0])}', '${escapeHtml(unmapped[0].split('@')[0])}', '', ${nextOrder})">+ 添加并排序首个</button>
+          </div>
+        `;
+      } else {
+        tipEl.innerHTML = '';
+      }
+    } else {
+      tipEl.innerHTML = '';
+    }
+  }
 }
+
+window.adjustAccountOrder = async function(key, delta) {
+  const accounts = activeAliases.accounts || [];
+  const idx = accounts.findIndex(a => (a.key || '').toLowerCase() === (key || '').toLowerCase());
+  if (idx === -1) return;
+
+  const targetIdx = idx + delta;
+  if (targetIdx < 0 || targetIdx >= accounts.length) return;
+
+  // Swap
+  const temp = accounts[idx];
+  accounts[idx] = accounts[targetIdx];
+  accounts[targetIdx] = temp;
+
+  // Reassign 1-based sequential sort_order
+  accounts.forEach((acc, i) => {
+    acc.sort_order = i + 1;
+  });
+
+  try {
+    const payload = accounts.map(a => ({
+      category: 'account',
+      key: a.key,
+      name: a.name,
+      short_name: a.short_name || '',
+      sort_order: a.sort_order
+    }));
+
+    const res = await fetch(getApiUrl('api/v1/config/aliases'), {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('调整排序失败: ' + (err.error || res.statusText));
+      return;
+    }
+    await loadAliases();
+    renderAliasTable();
+    await refreshDashboard(true);
+  } catch (e) {
+    alert('请求异常: ' + e.message);
+  }
+};
 
 window.startEditAlias = function(key) {
   editingAliasKey = key;
@@ -1066,8 +1188,10 @@ window.cancelEditAlias = function() {
 window.confirmSaveEditAlias = async function(key) {
   const nameEl = document.getElementById('input-edit-name');
   const shortEl = document.getElementById('input-edit-short');
+  const sortEl = document.getElementById('input-edit-sort');
   const name = nameEl ? nameEl.value.trim() : '';
   const shortName = shortEl ? shortEl.value.trim() : '';
+  const sortOrder = sortEl ? (parseInt(sortEl.value, 10) || 0) : 0;
   if (!name) {
     alert('完整显示名不能为空');
     return;
@@ -1077,7 +1201,7 @@ window.confirmSaveEditAlias = async function(key) {
     const res = await fetch(getApiUrl('api/v1/config/aliases'), {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify([{ category: currentAliasTab, key, name, short_name: shortName }])
+      body: JSON.stringify([{ category: currentAliasTab, key, name, short_name: shortName, sort_order: sortOrder }])
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -1095,7 +1219,7 @@ window.confirmSaveEditAlias = async function(key) {
 
 window.cancelAddAlias = function() {
   addingNewAlias = false;
-  newAliasPrefill = { key: '', name: '', short: '' };
+  newAliasPrefill = { key: '', name: '', short: '', sort: 0 };
   renderAliasTable();
 };
 
@@ -1103,9 +1227,11 @@ window.confirmSaveNewAlias = async function() {
   const keyEl = document.getElementById('input-new-key');
   const nameEl = document.getElementById('input-new-name');
   const shortEl = document.getElementById('input-new-short');
+  const sortEl = document.getElementById('input-new-sort');
   const key = keyEl ? keyEl.value.trim() : '';
   const name = nameEl ? nameEl.value.trim() : '';
   const shortName = shortEl ? shortEl.value.trim() : '';
+  const sortOrder = sortEl ? (parseInt(sortEl.value, 10) || 0) : 0;
 
   if (!key || !name) {
     alert('匹配 Key / 前缀 和 完整显示名 均不能为空');
@@ -1116,7 +1242,7 @@ window.confirmSaveNewAlias = async function() {
     const res = await fetch(getApiUrl('api/v1/config/aliases'), {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify([{ category: currentAliasTab, key, name, short_name: shortName }])
+      body: JSON.stringify([{ category: currentAliasTab, key, name, short_name: shortName, sort_order: sortOrder }])
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -1124,7 +1250,7 @@ window.confirmSaveNewAlias = async function() {
       return;
     }
     addingNewAlias = false;
-    newAliasPrefill = { key: '', name: '', short: '' };
+    newAliasPrefill = { key: '', name: '', short: '', sort: 0 };
     await loadAliases();
     renderAliasTable();
     await refreshDashboard(true);
@@ -1153,12 +1279,12 @@ window.confirmDeleteAlias = async function(key) {
   }
 };
 
-window.quickAddAlias = function(category, key, defaultName, defaultShort) {
+window.quickAddAlias = function(category, key, defaultName, defaultShort, defaultSort = 0) {
   currentAliasTab = category;
   toggleAliasModal(true);
   addingNewAlias = true;
   editingAliasKey = null;
-  newAliasPrefill = { key, name: defaultName, short: defaultShort };
+  newAliasPrefill = { key, name: defaultName, short: defaultShort, sort: defaultSort };
 
   document.querySelectorAll('.alias-tab').forEach(tab => {
     tab.classList.toggle('active', tab.getAttribute('data-tab') === currentAliasTab);
@@ -1263,7 +1389,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnAdd.addEventListener('click', () => {
       addingNewAlias = true;
       editingAliasKey = null;
-      newAliasPrefill = { key: '', name: '', short: '' };
+      let nextSort = 0;
+      if (currentAliasTab === 'account') {
+        const accs = activeAliases.accounts || [];
+        nextSort = accs.length + 1;
+      }
+      newAliasPrefill = { key: '', name: '', short: '', sort: nextSort };
       renderAliasTable();
       setTimeout(() => {
         const inputKey = document.getElementById('input-new-key');

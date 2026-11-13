@@ -198,3 +198,83 @@ func TestConcurrentWrites(t *testing.T) {
 		t.Fatalf("expected %d events, got %d", concurrency, count)
 	}
 }
+
+func TestAccountAliasSortOrder(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "sort_order_test.db")
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	n := node.GetNodeInfo("node_sort", "1.0.0")
+
+	// Ingest 3 accounts
+	for _, email := range []string{"charlie@example.com", "alice@example.com", "bob@example.com"} {
+		payload := fmt.Sprintf(`{
+			"product": "antigravity",
+			"session_id": "sess-%s",
+			"email": "%s",
+			"cwd": "/workspace",
+			"model": {"id": "gemini-3.8-flash"},
+			"quota": {
+				"gemini-weekly": {"remaining_fraction": 0.9, "reset_in_seconds": 3600}
+			}
+		}`, email, email)
+		env, _, err := model.ParseAndNormalize([]byte(payload), n)
+		if err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		if err := store.Ingest(env); err != nil {
+			t.Fatalf("failed to ingest: %v", err)
+		}
+	}
+
+	// Configure sort_order: bob = 1, alice = 2, charlie = 0
+	aliasesToSave := []model.DisplayAliasItem{
+		{Category: "account", Key: "bob@example.com", DisplayName: "Bob", ShortName: "B", SortOrder: 1},
+		{Category: "account", Key: "alice@example.com", DisplayName: "Alice", ShortName: "A", SortOrder: 2},
+		{Category: "account", Key: "charlie@example.com", DisplayName: "Charlie", ShortName: "C", SortOrder: 0},
+	}
+	if err := store.SaveDisplayAliases(aliasesToSave); err != nil {
+		t.Fatalf("failed to save aliases: %v", err)
+	}
+
+	// 1. Verify GetDisplayAliases ordering
+	cfg, err := store.GetDisplayAliases()
+	if err != nil {
+		t.Fatalf("failed to get display aliases: %v", err)
+	}
+	if len(cfg.Accounts) != 3 {
+		t.Fatalf("expected 3 accounts in aliases, got %d", len(cfg.Accounts))
+	}
+	if cfg.Accounts[0].Key != "bob@example.com" || cfg.Accounts[0].SortOrder != 1 {
+		t.Errorf("expected first account bob with sort 1, got %+v", cfg.Accounts[0])
+	}
+	if cfg.Accounts[1].Key != "alice@example.com" || cfg.Accounts[1].SortOrder != 2 {
+		t.Errorf("expected second account alice with sort 2, got %+v", cfg.Accounts[1])
+	}
+	if cfg.Accounts[2].Key != "charlie@example.com" || cfg.Accounts[2].SortOrder != 0 {
+		t.Errorf("expected third account charlie with sort 0, got %+v", cfg.Accounts[2])
+	}
+
+	// 2. Verify GetGroupedAccountQuotas ordering
+	groups, err := store.GetGroupedAccountQuotas()
+	if err != nil {
+		t.Fatalf("failed to get grouped quotas: %v", err)
+	}
+	if len(groups) != 3 {
+		t.Fatalf("expected 3 grouped quotas, got %d", len(groups))
+	}
+	if groups[0].AccountEmail != "bob@example.com" {
+		t.Errorf("expected #1 group to be bob@example.com, got %s", groups[0].AccountEmail)
+	}
+	if groups[1].AccountEmail != "alice@example.com" {
+		t.Errorf("expected #2 group to be alice@example.com, got %s", groups[1].AccountEmail)
+	}
+	if groups[2].AccountEmail != "charlie@example.com" {
+		t.Errorf("expected #3 group to be charlie@example.com, got %s", groups[2].AccountEmail)
+	}
+}

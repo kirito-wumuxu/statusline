@@ -55,6 +55,9 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to execute schema migration: %w", err)
 	}
 
+	// Idempotent column migrations for existing databases
+	_, _ = db.Exec("ALTER TABLE display_aliases ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;")
+
 	// Initialize default display aliases
 	if err := initDefaultAliases(db); err != nil {
 		slog.Warn("failed to initialize default display aliases", "error", err)

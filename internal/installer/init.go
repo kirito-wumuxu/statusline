@@ -267,6 +267,7 @@ func SyncAliasesFromRemote(out io.Writer) {
 			Key:       a.Key,
 			Name:      a.DisplayName,
 			ShortName: a.ShortName,
+			SortOrder: a.SortOrder,
 		})
 	}
 

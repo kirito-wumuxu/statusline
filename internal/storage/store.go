@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -708,16 +709,52 @@ func (s *Store) GetGroupedAccountQuotas() ([]AccountQuotaGroup, error) {
 		}
 	}
 
+	// Load account sort order from display_aliases
+	accountOrderMap := make(map[string]int)
+	if rows, err := s.db.Query("SELECT alias_key, sort_order FROM display_aliases WHERE category = 'account'"); err == nil {
+		for rows.Next() {
+			var aKey string
+			var sOrder int
+			if err := rows.Scan(&aKey, &sOrder); err == nil && sOrder > 0 {
+				accountOrderMap[strings.ToLower(aKey)] = sOrder
+			}
+		}
+		_ = rows.Close()
+	}
+
 	var result []AccountQuotaGroup
 	for _, email := range order {
 		result = append(result, *groupMap[email])
 	}
+
+	// Sort accounts by sort_order ASC, then fallback to original order
+	sort.SliceStable(result, func(i, j int) bool {
+		orderI := 999999
+		orderJ := 999999
+		if o, ok := accountOrderMap[strings.ToLower(result[i].AccountEmail)]; ok {
+			orderI = o
+		}
+		if o, ok := accountOrderMap[strings.ToLower(result[j].AccountEmail)]; ok {
+			orderJ = o
+		}
+		if orderI != orderJ {
+			return orderI < orderJ
+		}
+		return i < j
+	})
+
 	return result, nil
 }
 
 // GetDisplayAliases loads all configured display aliases grouped by category.
 func (s *Store) GetDisplayAliases() (*model.DisplayAliasesConfig, error) {
-	rows, err := s.db.Query("SELECT category, alias_key, display_name, short_name FROM display_aliases ORDER BY category, alias_key")
+	rows, err := s.db.Query(`
+		SELECT category, alias_key, display_name, short_name, sort_order
+		FROM display_aliases
+		ORDER BY category,
+			CASE WHEN sort_order > 0 THEN sort_order ELSE 999999 END ASC,
+			alias_key ASC
+	`)
 	if err != nil {
 		return nil, err
 	}
@@ -731,7 +768,8 @@ func (s *Store) GetDisplayAliases() (*model.DisplayAliasesConfig, error) {
 
 	for rows.Next() {
 		var cat, key, name, short string
-		if err := rows.Scan(&cat, &key, &name, &short); err != nil {
+		var sortOrder int
+		if err := rows.Scan(&cat, &key, &name, &short, &sortOrder); err != nil {
 			return nil, err
 		}
 		item := model.DisplayAliasItem{
@@ -739,6 +777,7 @@ func (s *Store) GetDisplayAliases() (*model.DisplayAliasesConfig, error) {
 			Key:         key,
 			DisplayName: name,
 			ShortName:   short,
+			SortOrder:   sortOrder,
 		}
 		switch cat {
 		case "quota":
@@ -762,11 +801,12 @@ func (s *Store) SaveDisplayAliases(items []model.DisplayAliasItem) error {
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO display_aliases (category, alias_key, display_name, short_name, updated_at)
-		VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		INSERT INTO display_aliases (category, alias_key, display_name, short_name, sort_order, updated_at)
+		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 		ON CONFLICT(category, alias_key) DO UPDATE SET
 			display_name = excluded.display_name,
 			short_name = excluded.short_name,
+			sort_order = excluded.sort_order,
 			updated_at = excluded.updated_at
 	`)
 	if err != nil {
@@ -778,7 +818,7 @@ func (s *Store) SaveDisplayAliases(items []model.DisplayAliasItem) error {
 		if item.Category == "" || item.Key == "" {
 			continue
 		}
-		if _, err := stmt.Exec(item.Category, item.Key, item.DisplayName, item.ShortName); err != nil {
+		if _, err := stmt.Exec(item.Category, item.Key, item.DisplayName, item.ShortName, item.SortOrder); err != nil {
 			return err
 		}
 	}

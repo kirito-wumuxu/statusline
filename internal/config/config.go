@@ -30,6 +30,7 @@ type DisplayAliasItem struct {
 	Key       string `yaml:"key" json:"key"`
 	Name      string `yaml:"name" json:"name"`
 	ShortName string `yaml:"short_name" json:"short_name"`
+	SortOrder int    `yaml:"sort_order,omitempty" json:"sort_order,omitempty"`
 }
 
 // Config is an alias to ClientConfig.

@@ -116,13 +116,37 @@ func TestHandlersReportAndQuery(t *testing.T) {
 	}
 
 	// 9. Test POST /api/v1/config/aliases
-	postPayload := `[{"category":"quota","key":"test-key","name":"Test Model","short_name":"TM"}]`
+	postPayload := `[
+		{"category":"quota","key":"test-key","name":"Test Model","short_name":"TM"},
+		{"category":"account","key":"vip@example.com","name":"VIP User","short_name":"VIP","sort_order":1}
+	]`
 	reqPostAliases := httptest.NewRequest(http.MethodPost, "/api/v1/config/aliases", bytes.NewBufferString(postPayload))
 	reqPostAliases.Header.Set("Content-Type", "application/json")
 	wPostAliases := httptest.NewRecorder()
 	srv.Router().ServeHTTP(wPostAliases, reqPostAliases)
 	if wPostAliases.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK from POST config/aliases, got %d", wPostAliases.Code)
+	}
+
+	// Verify GET /api/v1/config/aliases returns sort_order
+	reqGetAliasesAfter := httptest.NewRequest(http.MethodGet, "/api/v1/config/aliases", nil)
+	wGetAliasesAfter := httptest.NewRecorder()
+	srv.Router().ServeHTTP(wGetAliasesAfter, reqGetAliasesAfter)
+	var aliasesAfter model.DisplayAliasesConfig
+	if err := json.Unmarshal(wGetAliasesAfter.Body.Bytes(), &aliasesAfter); err != nil {
+		t.Fatalf("failed to decode aliasesAfter: %v", err)
+	}
+	var foundVip bool
+	for _, acc := range aliasesAfter.Accounts {
+		if acc.Key == "vip@example.com" {
+			foundVip = true
+			if acc.SortOrder != 1 {
+				t.Errorf("expected SortOrder 1 for vip@example.com, got %d", acc.SortOrder)
+			}
+		}
+	}
+	if !foundVip {
+		t.Errorf("expected vip@example.com in aliasesAfter accounts")
 	}
 	var debugReports []map[string]interface{}
 	if err := json.Unmarshal(wDebug.Body.Bytes(), &debugReports); err != nil {

@@ -590,6 +590,12 @@ i.rounded-full {
   background-color: #334155;
   color: #fff;
 }
+.btn-xs {
+  padding: 2px 6px;
+  font-size: 10px;
+  line-height: 12px;
+  border-radius: 4px;
+}
 .btn-primary {
   background-color: #0284c7;
   color: #fff;

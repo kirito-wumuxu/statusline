@@ -394,6 +394,7 @@ type DisplayAliasItem struct {
 	Key         string `json:"key"`                // prefix or pattern, e.g. "gemini", "gemini-argon", "3p"
 	DisplayName string `json:"name"`               // display name for full mode
 	ShortName   string `json:"short_name"`         // short name for compact mode
+	SortOrder   int    `json:"sort_order,omitempty"`// display order (1, 2, 3...)
 }
 
 // DisplayAliasesConfig groups all alias mapping rules.
