@@ -45,9 +45,12 @@
 
 - **⚡ 极致响应性能**：标准输入解析 + 终端 ANSI 排版输出全程低于 2ms，交互体验零延迟。
 - **🛡️ 纯 Go 零 CGO 静态二进制**：依赖 `modernc.org/sqlite`，在 Windows、Linux 与 macOS 上均可单一二进制独立运行，无需安装 gcc、cgo 或任何运行时环境。
+- **🎯 账号模型配额池与双层同心圆环**：208px 巨型 SVG 双层同心圆环仪表盘，外环 5 小时短期窗口，内环 7 天周度窗口；以单个配额模型为最小原子单元，账号卡片根据实体数量自适应跨列（1~4 列），宽屏大屏充分利用空间。
+- **🏷️ 统一显示别名管理与手动排序**：纯 Web 页面可视化管理账号/模型/配额实体别名映射，服务端 YAML 零配置；支持账号手动设置 `sort_order` 与快捷上下微调调整配额池展示顺序；`statusline init` 自动拉取同步至本地供离线渲染。
+- **📈 精准基线差值 Token 统计**：采用基线增量算法，长会话跨天只计算当天新增增量，空转心跳不虚增 Token，各日消耗之和严格等于历史总计；全面移除冗余的费用估算。
 - **📡 严格超时异步上报**：终端状态输出完成后，上报请求受 100ms 严格超时控制，即使服务端宕机或网络中断也静默忽略，绝不阻塞用户终端。
-- **📊 嵌入式 SQLite3 WAL 持久化**：服务端采用 WAL 高并发模式，4 张核心表（节点、会话快照、流水明细、账号配额）单事务 UPSERT 写入，支持高频写入无锁冲突。
-- **💻 嵌入式深色实时 Web 仪表盘**：通过 Go 1.16+ `//go:embed` 将前端（HTML/CSS/JS）静态资产内嵌进二进制，单文件直接运行并提供现代深色 Web 监控看板。
+- **📊 嵌入式 SQLite3 WAL 持久化**：服务端采用 WAL 高并发模式，5 张核心表（节点、会话快照、流水明细、账号配额、显示别名）单事务 UPSERT 写入，支持高频写入无锁冲突。
+- **💻 嵌入式深色实时 Web 仪表盘**：通过 Go 1.16+ `//go:embed` 将前端（HTML/CSS/JS）静态资产内嵌进二进制，单文件直接运行并提供四大全屏深色 Tab 监控看板。
 - **🧹 编码清洗器**：自动修复 Windows 终端常见的 GBK/UTF-8 错位乱码（如 `agentops 涓婃姤` 自动清理），确保数据库存储安全。
 - **🔒 跨平台机器指纹脱敏**：采集 Linux `/etc/machine-id` 或 Windows 注册表 `MachineGuid` 并进行 SHA256 脱敏哈希，保障多节点遥测隐私。
 
@@ -59,24 +62,24 @@
 
 | 平台与架构 | 文件名称 | 格式 |
 | :--- | :--- | :--- |
-| **Linux (x86_64 / amd64)** | `statusline_v0.1.2_linux_amd64.tar.gz` | `.tar.gz` |
-| **Linux (ARM64 / aarch64)** | `statusline_v0.1.2_linux_arm64.tar.gz` | `.tar.gz` |
-| **Windows (x86_64 / amd64)** | `statusline_v0.1.2_windows_amd64.zip` | `.zip` |
-| **macOS (Intel / amd64)** | `statusline_v0.1.2_darwin_amd64.tar.gz` | `.tar.gz` |
-| **macOS (Apple Silicon / M系列)** | `statusline_v0.1.2_darwin_arm64.tar.gz` | `.tar.gz` |
+| **Linux (x86_64 / amd64)** | `statusline_v0.1.5_linux_amd64.tar.gz` | `.tar.gz` |
+| **Linux (ARM64 / aarch64)** | `statusline_v0.1.5_linux_arm64.tar.gz` | `.tar.gz` |
+| **Windows (x86_64 / amd64)** | `statusline_v0.1.5_windows_amd64.zip` | `.zip` |
+| **macOS (Intel / amd64)** | `statusline_v0.1.5_darwin_amd64.tar.gz` | `.tar.gz` |
+| **macOS (Apple Silicon / M系列)** | `statusline_v0.1.5_darwin_arm64.tar.gz` | `.tar.gz` |
 
 ### Linux / macOS 一键解压与放置
 
 ```bash
 # 解压到本地 bin 目录 (以 Linux amd64 为例)
-tar -xzf statusline_v0.1.2_linux_amd64.tar.gz
+tar -xzf statusline_v0.1.5_linux_amd64.tar.gz
 chmod +x statusline statusline-server
 mv statusline statusline-server ~/.local/bin/
 ```
 
 ### Windows 安装
 
-解压 `statusline_v0.1.2_windows_amd64.zip` 后，将 `statusline.exe` 与 `statusline-server.exe` 放置于系统 `PATH` 包含的目录（如 `C:\Users\<用户名>\.local\bin`）即可。
+解压 `statusline_v0.1.5_windows_amd64.zip` 后，将 `statusline.exe` 与 `statusline-server.exe` 放置于系统 `PATH` 包含的目录（如 `C:\Users\<用户名>\.local\bin`）即可。
 
 ---
 
@@ -226,13 +229,14 @@ statusline-server -config server.yaml -port 8628 -db ~/.local/share/statusline/s
 
 ### Web 实时监控仪表盘
 
-启动后使用浏览器打开 `http://127.0.0.1:8628`：
+启动后使用浏览器打开 `http://127.0.0.1:8628`，体验全新设计的四大全屏深色 Tab 监控看板：
 
-- **核心指标总览**：实时展示当前活跃终端会话数、今日消耗 Token、历史累计 Token、多机在线节点与已上报账号。
-- **每日各模型 Token 消耗**：按日期分组统计并展示各模型输入/输出 Token 吞吐明细、模型消耗占比与估算费用。
-- **账号模型配额池**：按授权账号独立聚合展示 Gemini 与 Claude 的剩余配额百分比与冷却重置倒计时。
-- **终端会话列表**：按最新活跃时间倒序排列，支持根据物理节点下拉或标签快速过滤，查看各会话的路径、模型、上下文占用及 Token。
-- **调试原始上报接口**：支持 `GET /api/v1/debug/raw`（或页面右上角「调试原始上报」面板）获取最近 5 次客户端上报的原始 JSON 信封。
+- **顶部核心指标**：紧凑展示当前活跃终端会话数、今日消耗 Token、历史累计 Token（带明青/品红 `↑in / ↓out` 吞吐微标）、关联物理节点与活跃登录账号。
+- **🎯 账号模型配额池**：以单个模型配额为最小原子单元，账号卡片根据内部实体数量自适应跨列（1~4 列），流式紧凑排版；内嵌 208px 巨型 SVG 双层同心圆环（外环 5h 短期窗口，内环 7d 周度窗口），色彩根据余量（充足/中等/告警）平滑渐变，并支持通过别名管理自定义展示排序（带 `#1`, `#2` 序号徽标）。
+- **💻 活跃终端会话 (按项目聚合)**：按工作区项目目录自动分组聚合，清晰呈现每个项目的多会话状态、Git 分支、模型、上下文进度与实时 Token 消耗。
+- **📊 每日各模型 Token 消耗**：基于精准的基线差值算法，按日期统计各模型实际输入/输出 Token 吞吐与占比，长会话跨天不重复计费，空转心跳不虚报消耗。
+- **🏷️ 显示别名与排序管理**：纯 Web 页面可视化管理账号、模型与配额前缀映射规则；账号支持设置 `sort_order` 或快捷上下移动调整配额池顺序；客户端 `statusline init` 时自动拉取同步至本地。
+- **🐞 调试原始上报**：展示最近 5 次客户端上报的原始 JSON 信封，方便开发者一键排查终端 CLI 推送明细。
 
 ---
 
@@ -265,9 +269,10 @@ statusline-server -config server.yaml -port 8628 -db ~/.local/share/statusline/s
 ### 数据库设计 (SQLite3 WAL)
 
 - **`nodes`**：管理机器指纹（如 `node_8f9d2a1b4c3e5f6a`）、操作系统、架构与最后上报时间。
-- **`sessions`**：会话维度快照表，存储工作目录、Git 仓库元数据、最新累计 Token、费用与活跃时间。通过 `ON CONFLICT(session_id) DO UPDATE` 幂等刷新。
-- **`telemetry_events`**：瞬时流水明细表，记录单次问答触发的 Token 消耗、Context Window 使用率、缓存命中率及原始 JSON 备份。
+- **`sessions`**：会话维度快照表，存储工作目录、Git 仓库元数据、最新累计 Token 与活跃时间。通过 `ON CONFLICT(session_id) DO UPDATE` 幂等刷新。
+- **`telemetry_events`**：瞬时流水明细表，记录单次问答触发的 Token 消耗、单次增量（`current_usage`）、Context Window 使用率、缓存命中率及原始 JSON 备份。
 - **`account_quotas`**：多账号配额实时状态表，聚合记录各账号的 Gemini / Claude 配额余量与重置时间。
+- **`display_aliases`**：显示别名与展示排序持久化表（`category`, `alias_key`, `display_name`, `short_name`, `sort_order`），纯 Web 界面管理，服务端 YAML 零配置。
 
 ---
 
@@ -301,7 +306,7 @@ CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/statusli
 ### 3. 一键打包全平台 Release
 
 ```bash
-./scripts/build-release.sh v0.1.2
+./scripts/build-release.sh v0.1.5
 ```
 该脚本将自动在 `dist/` 目录下生成各平台压缩包并输出 `checksums.txt`。
 
