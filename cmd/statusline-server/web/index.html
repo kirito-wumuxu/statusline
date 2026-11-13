@@ -1,197 +1,265 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>StatusLine 实时监控看板</title>
+  <title>StatusLine 遥测监控 - 项目聚合版</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23131a26'/%3E%3Cpath d='M16 6 L26 16 L16 26 L6 16 Z' fill='none' stroke='%2338bdf8' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%2310b981'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=0.1.7">
+  <link rel="stylesheet" href="style.css?v=0.2.0">
 </head>
-<body>
-  <div class="app-layout">
-    <!-- 顶部导航栏 -->
-    <header class="app-header">
-      <div class="brand">
-        <span class="brand-icon">❖</span>
-        <h1 class="brand-title">StatusLine <span>遥测监控</span></h1>
-        <span id="live-indicator" class="live-dot" title="实时连接中"></span>
+<body class="p-4 xl:p-6 min-h-screen flex flex-col">
+
+  <div class="max-w-[1640px] w-full mx-auto space-y-5 flex-1 flex flex-col">
+
+    <!-- 1. 顶部栏 + 5大核心指标 -->
+    <header class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 card-bg p-4 rounded-2xl">
+      <div class="flex items-center justify-between xl:justify-start gap-5">
+        <div class="flex items-center gap-2.5">
+          <span class="text-sky-400 text-2xl">❖</span>
+          <h1 class="text-lg font-bold tracking-wide text-white">StatusLine <span class="text-slate-400 font-normal">遥测监控</span></h1>
+          <span id="live-indicator" class="live-dot" title="实时连接中"></span>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <button id="btn-toggle-aliases" onclick="toggleAliasModal(true)" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="管理配额、模型与账号的别名映射">🏷️ 别名映射</button>
+          <button onclick="switchMainTab('tab-debug')" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">🔍 调试原始上报 (5)</button>
+          <button id="btn-manual-refresh" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">↻ 立即刷新</button>
+          <span class="px-2.5 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 mono">
+            <span id="connection-status">已连接</span> · <span id="last-updated">--:--:--</span>
+          </span>
+        </div>
       </div>
-      <div class="header-meta">
-        <button id="btn-toggle-aliases" class="btn-action btn-aliases" title="管理配额、模型与账号的显示名称和缩写映射">
-          <span>🏷️</span> 别名映射
-        </button>
-        <button id="btn-toggle-debug" class="btn-action btn-debug" title="查看最近5次客户端上报原始数据">
-          <span>🔍</span> 调试原始上报 (5)
-        </button>
-        <button id="btn-manual-refresh" class="btn-action btn-refresh" title="立即刷新数据">
-          <span>⟳</span> 立即刷新
-        </button>
-        <div class="header-status">
-          <span id="connection-status" class="status-text">已连接</span>
-          <span class="separator">·</span>
-          <span id="last-updated" class="time-text">--:--:--</span>
+
+      <!-- 5大指标紧凑横向排列 (点击直接秒级切换对应 Tab) -->
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 xl:w-[58%]">
+        <div onclick="switchMainTab('tab-sessions')" class="sub-card-bg px-3.5 py-2 rounded-xl flex items-center justify-between cursor-pointer hover:border-sky-500/50 transition" title="查看活跃终端会话">
+          <div>
+            <div class="text-[11px] text-slate-400">活跃终端会话</div>
+            <div class="text-xl font-bold text-white mono" id="val-sessions">0</div>
+          </div>
+          <div class="text-[11px] text-slate-500 text-right" id="val-sources">0 个项目<br>0 agy / 0 claude</div>
+        </div>
+        <div onclick="switchMainTab('tab-tokens')" class="sub-card-bg px-3.5 py-2 rounded-xl flex items-center justify-between cursor-pointer hover:border-sky-500/50 transition" title="查看今日 Token 消耗">
+          <div>
+            <div class="text-[11px] text-slate-400">今日消耗 Token</div>
+            <div class="text-xl font-bold text-sky-400 mono" id="val-tokens-today">0</div>
+          </div>
+          <div class="text-[10px] text-slate-400 text-right mono" id="val-tokens-today-detail">↑0<br>↓0</div>
+        </div>
+        <div onclick="switchMainTab('tab-tokens')" class="sub-card-bg px-3.5 py-2 rounded-xl flex items-center justify-between cursor-pointer hover:border-sky-500/50 transition" title="查看历史累计消耗">
+          <div>
+            <div class="text-[11px] text-slate-400">历史累计 Token</div>
+            <div class="text-xl font-bold text-white mono" id="val-tokens-total">0</div>
+          </div>
+          <div class="text-[11px] text-slate-500 text-right" id="val-cost-total">$0.00</div>
+        </div>
+        <div onclick="switchMainTab('tab-sessions')" class="sub-card-bg px-3.5 py-2 rounded-xl flex items-center justify-between cursor-pointer hover:border-sky-500/50 transition" title="查看关联物理节点">
+          <div>
+            <div class="text-[11px] text-slate-400">关联物理节点</div>
+            <div class="text-xl font-bold text-emerald-400 mono" id="val-nodes">0</div>
+          </div>
+          <div class="text-[11px] text-slate-500 text-right" id="val-nodes-sub">多机采集</div>
+        </div>
+        <div onclick="switchMainTab('tab-quota')" class="sub-card-bg px-3.5 py-2 rounded-xl flex items-center justify-between cursor-pointer hover:border-sky-500/50 transition" title="查看账号模型配额池">
+          <div>
+            <div class="text-[11px] text-slate-400">活跃登录账号</div>
+            <div class="text-xl font-bold text-amber-400 mono" id="val-accounts">0</div>
+          </div>
+          <div class="text-[11px] text-slate-500 text-right" id="val-accounts-sub">已上报账号</div>
         </div>
       </div>
     </header>
 
-    <!-- 核心指标概览 -->
-    <section class="overview-grid">
-      <div class="stat-card">
-        <div class="stat-label">活跃终端会话</div>
-        <div class="stat-number" id="val-sessions">0</div>
-        <div class="stat-sub" id="val-sources">0 agy · 0 claude</div>
+    <!-- 2. 四大顶层 Tab 导航栏 -->
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+      <div class="flex flex-wrap gap-2.5">
+        <button id="btn-tab-quota" onclick="switchMainTab('tab-quota')" class="tab-btn active px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2">
+          <span>🎯 账号模型配额池</span>
+          <span id="badge-quota-count" class="px-2 py-0.5 text-xs rounded-full bg-black/30 mono">0 账号</span>
+        </button>
+        <button id="btn-tab-sessions" onclick="switchMainTab('tab-sessions')" class="tab-btn px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2">
+          <span>💻 活跃终端会话 (按项目聚合)</span>
+          <span id="badge-sessions-count" class="px-2 py-0.5 text-xs rounded-full bg-slate-800 text-emerald-400 mono">0 项目 · 0 会话</span>
+        </button>
+        <button id="btn-tab-tokens" onclick="switchMainTab('tab-tokens')" class="tab-btn px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2">
+          <span>📊 每日各模型 Token 消耗</span>
+          <span id="badge-tokens-count" class="px-2 py-0.5 text-xs rounded-full bg-slate-800 text-sky-400 mono">0</span>
+        </button>
+        <button id="btn-tab-debug" onclick="switchMainTab('tab-debug')" class="tab-btn px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2">
+          <span>🐞 最近 5 次客户端上报 (Debug)</span>
+          <span id="badge-debug-count" class="px-2 py-0.5 text-xs rounded-full bg-slate-800 text-amber-400 mono">0</span>
+        </button>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">今日消耗 Token</div>
-        <div class="stat-number stat-highlight" id="val-tokens-today">0</div>
-        <div class="stat-sub" id="val-tokens-today-detail">输入 ↑0 · 输出 ↓0</div>
+      
+      <div class="flex items-center gap-4 text-xs">
+        <span class="flex items-center gap-1.5 text-slate-300"><i class="w-2.5 h-2.5 rounded-full bg-sky-400"></i>Gemini 配额</span>
+        <span class="flex items-center gap-1.5 text-slate-300"><i class="w-2.5 h-2.5 rounded-full bg-emerald-400"></i>Claude 充足</span>
+        <span class="flex items-center gap-1.5 text-amber-400"><i class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></i>低配额预警 (&lt;20%)</span>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">历史累计 Token</div>
-        <div class="stat-number" id="val-tokens-total">0</div>
-        <div class="stat-sub" id="val-cost-total">累计估算: $0.00</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">关联物理节点</div>
-        <div class="stat-number stat-nodes" id="val-nodes">0</div>
-        <div class="stat-sub" id="val-nodes-sub">多机采集拓扑</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">活跃登录账号</div>
-        <div class="stat-number stat-account" id="val-accounts">0</div>
-        <div class="stat-sub" id="val-accounts-sub">已上报授权账号</div>
-      </div>
-    </section>
+    </div>
 
-    <!-- 每日各模型 Token 消耗表格 -->
-    <section class="dashboard-section">
-      <div class="section-title-bar">
-        <div>
-          <h2>每日各模型 Token 消耗</h2>
-          <span class="section-hint">按日期汇总各模型输入 / 输出 Token 吞吐与占比明细</span>
-        </div>
-        <div class="date-filter-group" id="date-tabs">
-          <span class="badge-range">📅 近 14 天聚合</span>
-        </div>
-      </div>
-      <div class="table-card">
-        <div class="table-responsive">
-          <table class="data-table" id="daily-tokens-table">
-            <thead>
-              <tr>
-                <th style="width: 130px;">日期</th>
-                <th style="width: 220px;">模型名称</th>
-                <th style="width: 120px;">输入 Token (↑)</th>
-                <th style="width: 120px;">输出 Token (↓)</th>
-                <th style="width: 130px;">总计 Token</th>
-                <th>消耗占比</th>
-                <th style="width: 100px; text-align: right;">估算费用</th>
-              </tr>
-            </thead>
-            <tbody id="daily-tokens-tbody">
-              <tr>
-                <td colspan="7" class="table-empty">数据加载中...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- 账号模型配额监控池 (按账号独立卡片分组展示) -->
-    <section class="dashboard-section">
-      <div class="section-title-bar">
-        <div>
-          <h2>账号模型配额池</h2>
-          <span class="section-hint">按账号聚合展示 Gemini 与 Claude 配额余量及周期重置倒计时</span>
-        </div>
-        <div class="quota-header-actions">
-          <div class="quota-legend">
-            <span class="legend-item" title="外环显示配额剩余百分比：≥70%绿色，30-69%黄色，<30%红色">
-              <span class="legend-ring-dot dot-outer"></span>外环: 额度余量
-            </span>
-            <span class="legend-item" title="内环显示重置周期倒计时进度：青色(5h短期)，紫色(7d周度)">
-              <span class="legend-ring-dot dot-inner"></span>内环: 倒计时
-            </span>
+    <!-- 3. TAB 1: 账号模型配额池 (208px 巨型同心双环) -->
+    <div id="tab-quota" class="flex-1 flex flex-col">
+      <section class="card-bg p-6 rounded-2xl flex-1 flex flex-col justify-between space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-bold text-white flex items-center gap-3">
+              账号模型配额池实时看板
+              <span class="text-xs font-normal px-2.5 py-1 rounded-md bg-slate-800 text-slate-300">外环：短期窗口 (5小时) · 内环：周度窗口 (7天)</span>
+            </h2>
           </div>
-          <span class="quota-accounts-count" id="quota-accounts-tip">0 个配额账号</span>
+          <div class="flex items-center gap-3 text-xs text-slate-400 mono">
+            <span id="quota-unmapped-tip" class="text-amber-400"></span>
+            <span>自动同步节点配额状态</span>
+          </div>
         </div>
-      </div>
-      <div id="quotas-container" class="account-quotas-list">
-        <div class="empty-placeholder">暂未检测到配额信息，Antigravity 会话产生交互后将自动同步...</div>
-      </div>
-    </section>
 
-    <!-- 活跃终端会话列表 (支持节点筛选 & 按更新时间倒序) -->
-    <section class="dashboard-section">
-      <div class="section-title-bar">
-        <div>
-          <h2>活跃终端会话</h2>
-          <span class="section-hint">按更新时间倒序排列，支持按物理节点快速过滤</span>
+        <div id="quotas-container" class="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 items-stretch">
+          <div class="text-slate-400 text-sm p-4 col-span-3 text-center">暂未检测到配额信息，终端会话产生交互后将自动同步...</div>
         </div>
-        <div class="node-filter-container">
-          <label for="node-filter-select" class="filter-label">节点筛选:</label>
-          <select id="node-filter-select" class="filter-select">
-            <option value="">全部节点 (All Nodes)</option>
-          </select>
-        </div>
-      </div>
-      <div id="sessions-container" class="session-cards-list">
-        <div class="empty-placeholder">暂未接收到任何会话遥测数据，请在终端中启动会话...</div>
-      </div>
-    </section>
+      </section>
+    </div>
 
-    <!-- 别名映射配置弹窗 / 抽屉 -->
-    <section class="dashboard-section alias-section" id="alias-modal" style="display: none;">
-      <div class="section-title-bar alias-title-bar">
-        <div>
-          <h2>🏷️ 显示别名映射管理</h2>
-          <span class="section-hint">配置配额前缀、模型与账号的展示名称与终端窄屏缩写（客户端执行 statusline init 时自动同步）</span>
+    <!-- 4. TAB 2: 活跃终端会话 (按项目工作区聚合) -->
+    <div id="tab-sessions" class="hidden">
+      <section class="card-bg p-6 rounded-2xl space-y-5">
+        <!-- 顶部筛选与控制栏 -->
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div>
+            <h2 class="text-lg font-bold text-white flex items-center gap-2.5">
+              活跃终端会话 · 按项目工作区聚合
+              <span id="sessions-filter-tip" class="px-2.5 py-0.5 text-xs rounded-full bg-sky-950 text-sky-400 border border-sky-800/60 mono">0 个项目目录 · 共 0 个会话</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-1">已按项目工作区路径自动归类，并汇总各项目下的累计 Token 吞吐量与活跃状态</p>
+          </div>
+          
+          <div class="flex flex-wrap items-center gap-3 text-xs">
+            <button onclick="toggleAllProjects(true)" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">全部展开</button>
+            <button onclick="toggleAllProjects(false)" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">全部折叠</button>
+            <div class="flex items-center gap-2">
+              <label for="node-filter-select" class="text-slate-400">节点筛选:</label>
+              <select id="node-filter-select" onchange="filterSessions()" class="filter-select">
+                <option value="">全部节点 (All Nodes)</option>
+              </select>
+            </div>
+          </div>
         </div>
-        <div class="alias-header-actions">
-          <button id="btn-add-alias" class="btn-action btn-sm btn-primary">+ 新增映射</button>
-          <button id="btn-close-alias" class="btn-action btn-sm">关闭</button>
+
+        <!-- 会话按项目聚合容器 -->
+        <div id="sessions-container" class="space-y-4">
+          <div class="text-slate-400 text-sm p-4 text-center">暂未接收到任何会话遥测数据，请在终端中启动会话...</div>
         </div>
-      </div>
-      <div class="alias-tabs">
-        <button class="alias-tab active" data-tab="quota">配额实体 (Quotas)</button>
-        <button class="alias-tab" data-tab="model">模型实体 (Models)</button>
-        <button class="alias-tab" data-tab="account">账号实体 (Accounts)</button>
-      </div>
-      <div class="table-card">
-        <div class="table-responsive">
-          <table class="data-table" id="alias-table">
+      </section>
+    </div>
+
+    <!-- 5. TAB 3: 每日各模型 Token 消耗 -->
+    <div id="tab-tokens" class="hidden">
+      <section class="card-bg p-6 rounded-2xl">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+          <div>
+            <h2 class="text-lg font-bold text-white">每日各模型 Token 消耗明细</h2>
+            <p class="text-xs text-slate-400 mt-0.5">按日期汇总各模型输入 / 输出 Token 吞吐与占比明细</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="px-3 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 border border-slate-700 mono">📅 近 14 天聚合</span>
+            <label class="text-xs text-slate-300 bg-slate-800/90 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" id="toggle-zero" onchange="toggleZeroRows()" checked class="rounded bg-slate-900 border-slate-600 text-sky-500">
+              显示 0 消耗模型行
+            </label>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs" id="daily-tokens-table">
             <thead>
-              <tr>
-                <th style="width: 240px;" id="alias-th-key">匹配前缀 / Key</th>
-                <th style="width: 240px;">完整显示名 (宽屏 display_name)</th>
-                <th style="width: 180px;">紧凑缩写 (窄屏 short_name)</th>
-                <th style="width: 140px; text-align: right;">操作</th>
+              <tr class="border-b border-slate-800 text-slate-400 bg-slate-900/40">
+                <th class="py-3 px-4" style="width: 140px;">日期</th>
+                <th class="py-3 px-4" style="width: 220px;">模型名称</th>
+                <th class="py-3 px-4" style="width: 130px;">输入 Token (↑)</th>
+                <th class="py-3 px-4" style="width: 130px;">输出 Token (↓)</th>
+                <th class="py-3 px-4" style="width: 140px;">总计 Token</th>
+                <th class="py-3 px-4 w-64">消耗占比</th>
+                <th class="py-3 px-4 text-right" style="width: 100px;">估算费用</th>
               </tr>
             </thead>
-            <tbody id="alias-tbody">
-              <tr><td colspan="4" class="table-empty">加载别名映射中...</td></tr>
+            <tbody id="daily-tokens-tbody" class="divide-y divide-slate-800/60 mono">
+              <tr>
+                <td colspan="7" class="py-8 text-center text-slate-500">数据加载中...</td>
+              </tr>
             </tbody>
           </table>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
 
-    <!-- 调试信息抽屉 / 模态卡片 (最近5次上报原始数据) -->
-    <section class="dashboard-section debug-section" id="debug-drawer" style="display: none;">
-      <div class="section-title-bar debug-title-bar">
-        <div>
-          <h2>最近 5 次客户端上报原始数据 (Debug)</h2>
-          <span class="section-hint">实时展示终端插件 POST 上报的原始 JSON 信封</span>
+    <!-- 6. TAB 4: 最近 5 次客户端上报 (Debug) -->
+    <div id="tab-debug" class="hidden">
+      <section class="card-bg p-6 rounded-2xl">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+          <div>
+            <h2 class="text-lg font-bold text-white">最近 5 次客户端上报原始数据 (Debug)</h2>
+            <p class="text-xs text-slate-400 mt-0.5">左侧选择上报记录，右侧查看完整格式化 JSON 载荷</p>
+          </div>
+          <button id="btn-copy-debug" onclick="copyCurrentDebugJSON()" class="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition">
+            📋 复制当前 JSON
+          </button>
         </div>
-        <button id="btn-close-debug" class="btn-action btn-sm">关闭面板</button>
-      </div>
-      <div id="debug-container" class="debug-cards-list">
-        <div class="empty-placeholder">加载最近原始上报中...</div>
-      </div>
-    </section>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <!-- 左侧 5 笔流水列表 -->
+          <div id="debug-list-container" class="lg:col-span-4 space-y-2.5 mono text-xs">
+            <div class="text-slate-500 text-center py-4">加载原始上报记录中...</div>
+          </div>
+          <!-- 右侧 JSON 高亮查看器 -->
+          <div class="lg:col-span-8 bg-[#06090e] border border-slate-800 rounded-xl p-4 flex flex-col">
+            <div id="debug-meta" class="text-xs text-sky-400 mono border-b border-slate-800 pb-2.5 mb-3">
+              当前查看: --
+            </div>
+            <pre id="json-viewer" class="text-xs text-emerald-300 mono overflow-x-auto leading-relaxed flex-1">暂无数据</pre>
+          </div>
+        </div>
+      </section>
+    </div>
+
   </div>
 
-  <script src="app.js?v=0.1.7"></script>
+  <!-- 7. 别名映射配置弹窗 / 抽屉 (全屏居中浮层) -->
+  <div id="alias-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center gap-2">🏷️ 显示别名映射管理</h2>
+          <p class="text-xs text-slate-400 mt-1">配置配额前缀、模型与账号的展示名称与终端窄屏缩写（客户端执行 statusline init 时自动同步）</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-add-alias" class="btn-action btn-primary">+ 新增映射</button>
+          <button id="btn-close-alias" onclick="toggleAliasModal(false)" class="btn-action">关闭</button>
+        </div>
+      </div>
+      <div class="modal-body space-y-4">
+        <div class="flex gap-2 border-b border-slate-800 pb-2">
+          <button class="alias-tab tab-btn active px-4 py-1.5 rounded-lg text-xs font-bold" data-tab="quota">配额实体 (Quotas)</button>
+          <button class="alias-tab tab-btn px-4 py-1.5 rounded-lg text-xs font-bold" data-tab="model">模型实体 (Models)</button>
+          <button class="alias-tab tab-btn px-4 py-1.5 rounded-lg text-xs font-bold" data-tab="account">账号实体 (Accounts)</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs" id="alias-table">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400">
+                <th class="py-2.5 px-3" style="width: 220px;" id="alias-th-key">匹配前缀 / Key</th>
+                <th class="py-2.5 px-3" style="width: 220px;">完整显示名 (宽屏)</th>
+                <th class="py-2.5 px-3" style="width: 160px;">紧凑缩写 (窄屏)</th>
+                <th class="py-2.5 px-3 text-right" style="width: 120px;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="alias-tbody" class="divide-y divide-slate-800/60 mono">
+              <tr><td colspan="4" class="py-4 text-center text-slate-500">加载别名映射中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=0.2.0"></script>
 </body>
 </html>

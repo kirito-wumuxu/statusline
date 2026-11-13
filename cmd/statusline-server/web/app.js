@@ -1,6 +1,11 @@
-// State
+// ==========================================================================
+// StatusLine Web Dashboard - Core Application Engine
+// Giant Concentric Rings Quota Pool, Workspace Project Grouping, Master-Detail Debug
+// ==========================================================================
+
+// Global State
+let activeMainTab = 'tab-quota'; // 'tab-quota' | 'tab-sessions' | 'tab-tokens' | 'tab-debug'
 let selectedNodeId = '';
-let isDebugOpen = false;
 let isAliasesOpen = false;
 let currentAliasTab = 'quota'; // 'quota' | 'model' | 'account'
 let addingNewAlias = false;
@@ -10,12 +15,18 @@ let activeAliases = { quotas: [], models: [], accounts: [] };
 let knownNodes = [];
 const expandedSessionIds = new Set();
 const rawReportsCache = new Map();
-let lastRenderCache = { daily: '', quotas: '', sessions: '' };
+let currentDebugId = null;
+let lastRenderCache = { daily: '', quotas: '', sessions: '', overview: '' };
 let refreshTimer = null;
 
 function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
+}
+
+function setHtml(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
 }
 
 // 联动顶部连接指示器与文字状态
@@ -33,7 +44,7 @@ function setConnectionState(isConnected, statusText) {
   }
   if (statusEl) {
     statusEl.textContent = statusText;
-    statusEl.style.color = isConnected ? 'var(--accent-emerald)' : 'var(--accent-rose)';
+    statusEl.style.color = isConnected ? '#34d399' : '#f43f5e';
   }
 }
 
@@ -126,24 +137,24 @@ function matchQuotaAlias(rawKey) {
   };
 }
 
-function matchModelAlias(modelID, displayName) {
-  const target = (modelID || '').toLowerCase();
-  const disp = (displayName || '').toLowerCase();
+function matchModelAlias(modelId, displayName) {
+  const idLower = (modelId || '').toLowerCase();
+  const nameLower = (displayName || '').toLowerCase();
+
   for (const item of (activeAliases.models || [])) {
     const kLower = (item.key || '').toLowerCase();
-    if ((target && target.includes(kLower)) || (disp && disp.includes(kLower))) {
+    if (idLower.includes(kLower) || nameLower.includes(kLower)) {
       return { name: item.name, shortName: item.short_name, matched: true };
     }
   }
-  return { name: displayName || modelID, shortName: '', matched: false };
+  return { name: displayName || modelId || 'Gemini', shortName: '', matched: false };
 }
 
 function matchAccountAlias(email) {
-  if (!email) return { name: '', shortName: '', matched: false };
-  const lower = email.trim().toLowerCase();
+  const eLower = (email || '').toLowerCase();
   for (const item of (activeAliases.accounts || [])) {
     const kLower = (item.key || '').toLowerCase();
-    if (lower === kLower || lower.startsWith(kLower)) {
+    if (eLower === kLower || eLower.startsWith(kLower)) {
       return { name: item.name, shortName: item.short_name, matched: true };
     }
   }
@@ -222,6 +233,35 @@ function syntaxHighlightJSON(rawObj) {
   });
 }
 
+// 顶层 Tab 切换
+window.switchMainTab = function(tabId) {
+  activeMainTab = tabId;
+  const tabs = ['tab-quota', 'tab-sessions', 'tab-tokens', 'tab-debug'];
+  tabs.forEach(id => {
+    const el = document.getElementById(id);
+    const btn = document.getElementById('btn-' + id);
+    if (el) {
+      if (id === tabId) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    }
+    if (btn) {
+      if (id === tabId) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    }
+  });
+
+  // 如果切到 debug 且尚未加载数据，立即加载
+  if (tabId === 'tab-debug') {
+    loadDebugRawReports();
+  }
+};
+
 // 1. 初始化并更新节点下拉筛选器
 async function loadNodes() {
   try {
@@ -247,373 +287,693 @@ async function loadNodes() {
   }
 }
 
-// 2. 渲染每日各模型 Token 表格 (带数据无变化跳过 & 明细行日期去重)
-function renderDailyTokensTable(dailyTokens, forceRedraw = false) {
-  const tbody = document.getElementById('daily-tokens-tbody');
-  if (!tbody) return;
-
-  const cacheKey = JSON.stringify(dailyTokens || []);
-  if (!forceRedraw && lastRenderCache.daily === cacheKey) {
-    return; // 数据无变化，跳过 DOM 重绘
-  }
-  lastRenderCache.daily = cacheKey;
-
-  if (!dailyTokens || dailyTokens.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">暂无每日 Token 统计数据，终端产生对话后自动展示</td></tr>';
-    return;
-  }
-
-  const todayStr = new Date().toISOString().slice(0, 10);
-  let html = '';
-
-  for (const day of dailyTokens) {
-    const isToday = day.date === todayStr;
-    const dayTag = isToday ? ' (今日)' : '';
-    const dayTotalIn = formatTokens(day.total_input_tokens);
-    const dayTotalOut = formatTokens(day.total_output_tokens);
-    const dayTotal = formatTokens(day.total_tokens);
-    const dayCost = formatUSD(day.total_cost_usd);
-
-    // 日期汇总行
-    html += `
-      <tr class="day-header-row">
-        <td colspan="2">📅 <strong>${escapeHtml(day.date)}${dayTag}</strong></td>
-        <td><span class="token-in">↑${dayTotalIn}</span></td>
-        <td><span class="token-out">↓${dayTotalOut}</span></td>
-        <td><span class="token-total">${dayTotal}</span></td>
-        <td><span class="pct-text" style="width:auto; font-weight: 600;">当天总计</span></td>
-        <td class="cost-text"><strong>${dayCost}</strong></td>
-      </tr>
-    `;
-
-    // 模型明细行 (去重重复日期，以树状符号展现)
-    const models = day.models || [];
-    for (let i = 0; i < models.length; i++) {
-      const m = models[i];
-      const pct = m.percentage || 0;
-      const mIn = formatTokens(m.input_tokens);
-      const mOut = formatTokens(m.output_tokens);
-      const mTot = formatTokens(m.total_tokens);
-      const mCost = formatUSD(m.cost_usd);
-      const subPrefix = i === 0 ? '↳ 明细' : '↳';
-
-      const matchedModel = matchModelAlias(m.model_id, m.display_name);
-      const displayModel = matchedModel.name || m.display_name || m.model_id;
-
-      html += `
-        <tr>
-          <td class="sub-row-cell">${subPrefix}</td>
-          <td><span class="model-tag" title="${escapeHtml(m.model_id || '')}">${escapeHtml(displayModel)}</span></td>
-          <td><span class="token-in">↑${mIn}</span></td>
-          <td><span class="token-out">↓${mOut}</span></td>
-          <td><span class="token-total">${mTot}</span></td>
-          <td>
-            <div class="share-cell">
-              <div class="pct-bar-wrap">
-                <div class="pct-fill" style="width: ${Math.min(100, Math.max(2, pct))}%;"></div>
-              </div>
-              <span class="pct-text">${pct.toFixed(1)}%</span>
-            </div>
-          </td>
-          <td class="cost-text">${mCost}</td>
-        </tr>
-      `;
-    }
-  }
-
-  tbody.innerHTML = html;
-}
-
-// 解析倒计时字符串为秒数 (例如 "2h10m" -> 7800, "5d18h" -> 496800)
-function parseCountdownToSeconds(str) {
-  if (!str || typeof str !== 'string') return 0;
-  let total = 0;
-  const days = str.match(/(\d+)\s*d/);
-  if (days) total += parseInt(days[1], 10) * 86400;
-  const hours = str.match(/(\d+)\s*h/);
-  if (hours) total += parseInt(hours[1], 10) * 3600;
-  const mins = str.match(/(\d+)\s*m/);
-  if (mins) total += parseInt(mins[1], 10) * 60;
-  const secs = str.match(/(\d+)\s*s/);
-  if (secs) total += parseInt(secs[1], 10);
-  return total;
-}
-
-// 渲染单个同心双环进度条 (外环: 额度余量, 内环: 倒计时进度)
-function renderConcentricRing(pct, resetCountdown, resetInSec, isShortWindow, windowLabel) {
-  const p = Math.max(0, Math.min(100, Math.round(pct != null ? pct : 100)));
-
-  // 外环颜色映射 (≥70% 绿色 #10b981, 30-69% 黄色 #f59e0b, <30% 红色 #ef4444)
-  let outerColor = '#10b981';
-  if (p < 30) {
-    outerColor = '#ef4444';
-  } else if (p < 70) {
-    outerColor = '#f59e0b';
-  }
-
-  // 外环几何参数: R=23, 周长 C = 2 * π * 23 ≈ 144.51
-  const outerCircumference = 144.51;
-  const outerOffset = (outerCircumference * (1 - p / 100)).toFixed(2);
-
-  // 内环颜色映射 (短期窗口 5h: 青色 #06b6d4, 周度窗口 7d: 紫色 #a855f7)
-  const innerColor = isShortWindow ? '#06b6d4' : '#a855f7';
-  const totalWindowSec = isShortWindow ? 18000 : 604800; // 5h=18000s, 7d=604800s
-
-  let remainSec = resetInSec;
-  if (!remainSec || remainSec <= 0) {
-    remainSec = parseCountdownToSeconds(resetCountdown);
-  }
-  const ratio = (totalWindowSec > 0 && remainSec > 0)
-    ? Math.max(0, Math.min(1, remainSec / totalWindowSec))
-    : 1;
-
-  // 内环几何参数: R=16.5, 周长 C = 2 * π * 16.5 ≈ 103.67
-  const innerCircumference = 103.67;
-  const innerOffset = (innerCircumference * (1 - ratio)).toFixed(2);
-
-  const countdownDisplay = resetCountdown ? escapeHtml(resetCountdown) : '--';
-  const tooltip = `${windowLabel} 窗口 | 额度余量: ${p}% | 倒计时: ${countdownDisplay}`;
-
-  return `
-    <div class="quota-ring-item" title="${tooltip}">
-      <div class="quota-ring-svg-wrap">
-        <svg width="56" height="56" viewBox="0 0 56 56" class="concentric-ring-svg">
-          <!-- 外环背景 -->
-          <circle cx="28" cy="28" r="23" fill="none" stroke="#21262d" stroke-width="3.0" />
-          <!-- 外环进度 (额度余量) -->
-          <circle cx="28" cy="28" r="23" fill="none" stroke="${outerColor}" stroke-width="3.0"
-            stroke-dasharray="${outerCircumference}" stroke-dashoffset="${outerOffset}"
-            stroke-linecap="round" transform="rotate(-90 28 28)" />
-          <!-- 内环背景 -->
-          <circle cx="28" cy="28" r="16.5" fill="none" stroke="#161b22" stroke-width="2.2" />
-          <!-- 内环进度 (倒计时进度) -->
-          <circle cx="28" cy="28" r="16.5" fill="none" stroke="${innerColor}" stroke-width="2.2"
-            stroke-dasharray="${innerCircumference}" stroke-dashoffset="${innerOffset}"
-            stroke-linecap="round" transform="rotate(-90 28 28)" />
-          <!-- 中心百分比数值 -->
-          <text x="28" y="32" text-anchor="middle" font-size="11" font-weight="700" fill="#f0f6fc">${p}%</text>
-        </svg>
-      </div>
-      <div class="quota-ring-caption">
-        <span class="caption-window">${escapeHtml(windowLabel)}</span>
-        <span class="caption-time" style="color: ${innerColor};">${countdownDisplay}</span>
-      </div>
-    </div>
-  `;
-}
-
-// 提取并聚合账号下的所有 Provider 配额窗口（支持 Gemini, Argon, Claude 及任意动态前缀）
-function extractAllProviderGroups(acc) {
-  const groupsMap = new Map();
-
-  // 1. 优先从 acc.buckets 提取 (动态多 Provider 支持)
-  if (acc.buckets && Array.isArray(acc.buckets) && acc.buckets.length > 0) {
-    for (const b of acc.buckets) {
-      const qKey = b.quota_key || b.prefix || '';
-      const alias = matchQuotaAlias(qKey);
-      const isShort = (alias.window === '5h') || (b.reset_in_seconds && b.reset_in_seconds <= 86400);
-      const label = alias.window || (isShort ? '5h' : '7d');
-
-      let grp = groupsMap.get(alias.name);
-      if (!grp) {
-        const lower = alias.name.toLowerCase();
-        let pillClass = 'other-pill';
-        if (lower.includes('gemini')) pillClass = 'gemini-pill';
-        else if (lower.includes('argon')) pillClass = 'argon-pill';
-        else if (lower.includes('claude') || lower.includes('3p')) pillClass = 'claude-pill';
-
-        grp = {
-          name: alias.name,
-          shortName: alias.shortName,
-          prefix: alias.prefix,
-          matched: alias.matched,
-          pillClass: pillClass,
-          windows: []
-        };
-        groupsMap.set(alias.name, grp);
-      }
-
-      grp.windows.push({
-        label,
-        isShort,
-        pct: b.remaining_pct != null ? b.remaining_pct : Math.round((b.remaining_fraction || 0) * 100),
-        countdown: b.reset_countdown || (b.reset_in_seconds ? formatDurationCompact(b.reset_in_seconds) : '--'),
-        resetInSec: b.reset_in_seconds || 0
-      });
-    }
-  }
-
-  // 2. 若 buckets 为空，从老字段 gemini / claude 回退兼容
-  if (groupsMap.size === 0) {
-    if (acc.gemini) {
-      const gWin = [];
-      if (acc.gemini.short_percentage != null || acc.gemini.short_reset) {
-        gWin.push({
-          label: '5h',
-          isShort: true,
-          pct: acc.gemini.short_percentage != null ? acc.gemini.short_percentage : 100,
-          countdown: acc.gemini.short_reset || '--',
-          resetInSec: parseCountdownToSeconds(acc.gemini.short_reset)
-        });
-      }
-      if (acc.gemini.long_percentage != null || acc.gemini.long_reset) {
-        gWin.push({
-          label: '7d',
-          isShort: false,
-          pct: acc.gemini.long_percentage != null ? acc.gemini.long_percentage : 100,
-          countdown: acc.gemini.long_reset || '--',
-          resetInSec: parseCountdownToSeconds(acc.gemini.long_reset)
-        });
-      }
-      if (gWin.length > 0) {
-        groupsMap.set('Gemini', {
-          name: 'Gemini',
-          shortName: 'G',
-          prefix: 'gemini',
-          matched: true,
-          pillClass: 'gemini-pill',
-          windows: gWin
-        });
-      }
-    }
-
-    if (acc.claude) {
-      const cWin = [];
-      if (acc.claude.short_percentage != null || acc.claude.short_reset) {
-        cWin.push({
-          label: '5h',
-          isShort: true,
-          pct: acc.claude.short_percentage != null ? acc.claude.short_percentage : 100,
-          countdown: acc.claude.short_reset || '--',
-          resetInSec: parseCountdownToSeconds(acc.claude.short_reset)
-        });
-      }
-      if (acc.claude.long_percentage != null || acc.claude.long_reset) {
-        cWin.push({
-          label: '7d',
-          isShort: false,
-          pct: acc.claude.long_percentage != null ? acc.claude.long_percentage : 100,
-          countdown: acc.claude.long_reset || '--',
-          resetInSec: parseCountdownToSeconds(acc.claude.long_reset)
-        });
-      }
-      if (cWin.length > 0) {
-        groupsMap.set('Claude', {
-          name: 'Claude',
-          shortName: 'C',
-          prefix: 'claude',
-          matched: true,
-          pillClass: 'claude-pill',
-          windows: cWin
-        });
-      }
-    }
-  }
-
-  // 排序：Gemini -> Argon -> Claude -> 其他
-  const priority = (name) => {
-    const l = name.toLowerCase();
-    if (l.includes('gemini')) return 1;
-    if (l.includes('argon')) return 2;
-    if (l.includes('claude') || l.includes('3p')) return 3;
-    return 10;
-  };
-
-  const groups = Array.from(groupsMap.values());
-  for (const g of groups) {
-    g.windows.sort((a, b) => a.resetInSec - b.resetInSec);
-  }
-  groups.sort((a, b) => {
-    const pA = priority(a.name);
-    const pB = priority(b.name);
-    if (pA !== pB) return pA - pB;
-    return a.name.localeCompare(b.name);
-  });
-
-  return groups;
-}
-
-// 3. 渲染按账号区分的模型配额池 (紧凑彩色同心双环仪表盘，带防重绘闪烁)
-function renderAccountQuotas(accountQuotas, forceRedraw = false) {
+// 2. 渲染账号模型配额池 (208px 巨型同心双环)
+function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
   const container = document.getElementById('quotas-container');
-  const tip = document.getElementById('quota-accounts-tip');
   if (!container) return;
 
-  const cacheKey = JSON.stringify(accountQuotas || []) + '|' + JSON.stringify(activeAliases.quotas || []);
+  const cacheKey = JSON.stringify(groupedAccounts || []);
   if (!forceRedraw && lastRenderCache.quotas === cacheKey) {
-    return; // 数据无变化，跳过 DOM 重绘以保持 hover 与动画
+    return;
   }
   lastRenderCache.quotas = cacheKey;
 
-  if (!accountQuotas || accountQuotas.length === 0) {
-    container.innerHTML = '<div class="empty-placeholder">暂未检测到配额信息，Antigravity 账号产生会话后将在此按账号独立呈现配额池...</div>';
-    if (tip) tip.textContent = '0 个配额账号';
+  const accounts = groupedAccounts || [];
+  setText('badge-quota-count', `${accounts.length} 账号`);
+  setText('val-accounts', accounts.length);
+  setText('val-accounts-sub', `${accounts.length} 个上报账号`);
+
+  if (accounts.length === 0) {
+    container.innerHTML = `<div class="text-slate-400 text-sm p-4 col-span-3 text-center">暂未检测到配额信息，终端会话产生交互后将自动同步...</div>`;
     return;
   }
 
-  if (tip) tip.textContent = `${accountQuotas.length} 个配额账号`;
-
   let html = '';
-  for (const acc of accountQuotas) {
-    const email = acc.account_email || '未命名账号';
+  let unmappedFound = [];
+
+  for (const acc of accounts) {
+    const email = acc.account_email || '未知账号';
     const accAlias = matchAccountAlias(email);
-    const displayEmail = accAlias.matched ? `${accAlias.name} (${email})` : email;
-    const lastNode = acc.last_node_id ? `上报节点: ${escapeHtml(acc.last_node_id)}` : '';
-    let updateTimeStr = '--';
-    if (acc.updated_at) {
-      const d = new Date(acc.updated_at);
-      updateTimeStr = isNaN(d.getTime()) ? acc.updated_at : d.toLocaleTimeString();
+    const displayEmail = accAlias.matched && accAlias.name ? `${accAlias.name} (${email})` : email;
+    const nodeId = acc.node_id || acc.last_node_id || 'node_default';
+    const updatedStr = acc.updated_at ? new Date(acc.updated_at).toLocaleTimeString() : '--:--:--';
+
+    // 聚合该账号下的所有配额项 (按实体前缀分组)
+    const rawItems = acc.buckets || acc.quotas || [];
+    const entityMap = new Map();
+
+    for (const q of rawItems) {
+      const { prefix, window } = splitQuotaKeySuffix(q.quota_key);
+      const alias = matchQuotaAlias(q.quota_key);
+      const entityKey = (alias.prefix || prefix || 'unknown').toLowerCase();
+
+      if (!alias.matched && !unmappedFound.includes(alias.prefix)) {
+        unmappedFound.push(alias.prefix);
+      }
+
+      if (!entityMap.has(entityKey)) {
+        entityMap.set(entityKey, {
+          key: entityKey,
+          displayName: alias.name || prefix.toUpperCase(),
+          shortName: alias.shortName || prefix.slice(0, 2).toUpperCase(),
+          matched: alias.matched,
+          prefix: alias.prefix,
+          shortItem: null,
+          weeklyItem: null,
+          allItems: []
+        });
+      }
+      const ent = entityMap.get(entityKey);
+      ent.allItems.push(q);
+
+      const winLower = (window || '').toLowerCase();
+      if (winLower === '5h' || winLower === '24h' || (!ent.shortItem && winLower !== '7d' && winLower !== '30d')) {
+        ent.shortItem = q;
+      }
+      if (winLower === '7d' || winLower === '30d' || (ent.shortItem && ent.shortItem !== q && !ent.weeklyItem)) {
+        ent.weeklyItem = q;
+      }
     }
 
-    const providerGroups = extractAllProviderGroups(acc);
-    let groupsHtml = '';
+    const entities = Array.from(entityMap.values());
+    const entityColsClass = entities.length <= 1 ? 'grid-cols-1' : entities.length === 2 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-3';
 
-    for (const grp of providerGroups) {
-      const rings = grp.windows.map(w => renderConcentricRing(w.pct, w.countdown, w.resetInSec, w.isShort, w.label)).join('');
-      const unmappedBtn = !grp.matched
-        ? `<button class="btn-quick-alias" title="点击为此配额前缀快速配置别名" onclick="quickAddAlias('quota', '${escapeHtml(grp.prefix)}', '${escapeHtml(grp.name)}', '${escapeHtml(grp.shortName)}')">+ 映射</button>`
-        : '';
+    let entityBoxesHtml = '';
+    for (const ent of entities) {
+      const shortItem = ent.shortItem || (ent.allItems[0] || null);
+      const weeklyItem = ent.weeklyItem || (ent.allItems.length > 1 ? ent.allItems[1] : null);
 
-      groupsHtml += `
-        <div class="quota-provider-group ${escapeHtml(grp.pillClass.replace('-pill', '-group'))}">
-          <div class="provider-badge-row">
-            <span class="provider-pill ${escapeHtml(grp.pillClass)}">${escapeHtml(grp.name)}</span>
-            ${unmappedBtn}
+      const shortFraction = shortItem ? Number(shortItem.remaining_fraction || 0) : 1;
+      const shortReset = shortItem ? Number(shortItem.reset_in_seconds || 0) : 0;
+      const shortPct = Math.round(shortFraction * 100);
+
+      const weeklyFraction = weeklyItem ? Number(weeklyItem.remaining_fraction || 0) : 1;
+      const weeklyReset = weeklyItem ? Number(weeklyItem.reset_in_seconds || 0) : 0;
+      const weeklyPct = Math.round(weeklyFraction * 100);
+
+      const hasWarning = shortPct < 20 || weeklyPct < 20;
+      const isCritical = shortPct < 10 || weeklyPct < 10;
+
+      // Concentric Rings Math (ViewBox: 0 0 120 120)
+      // Outer Ring: R=52, Circumference = 2 * PI * 52 ≈ 326.7
+      const C1 = 326.7;
+      const offset1 = (C1 * (1 - Math.min(1, Math.max(0, shortFraction)))).toFixed(1);
+      
+      // Inner Ring: R=38, Circumference = 2 * PI * 38 ≈ 238.7
+      const C2 = 238.7;
+      const offset2 = (C2 * (1 - Math.min(1, Math.max(0, weeklyFraction)))).toFixed(1);
+
+      // Colors
+      let outerColor = '#38bdf8'; // sky
+      if (ent.displayName.toLowerCase().includes('claude')) {
+        outerColor = '#10b981'; // emerald
+      }
+      if (shortPct < 20) {
+        outerColor = '#f59e0b'; // amber
+      } else if (shortPct < 10) {
+        outerColor = '#f43f5e'; // rose
+      }
+
+      let innerColor = '#0284c7'; // dark sky
+      if (ent.displayName.toLowerCase().includes('claude')) {
+        innerColor = weeklyPct < 20 ? '#f59e0b' : '#a855f7';
+      } else if (weeklyPct < 20) {
+        innerColor = '#f59e0b';
+      }
+
+      // Border style for model box
+      const boxBorderClass = hasWarning ? 'border border-amber-500/40' : 'border border-slate-800/90';
+
+      // Provider label or warning tag
+      let tagHtml = `<span class="text-xs text-slate-400">${ent.displayName.toLowerCase().includes('claude') ? 'Anthropic' : 'Google AI'}</span>`;
+      if (hasWarning) {
+        tagHtml = `<span class="text-xs text-amber-400 font-semibold animate-pulse">● ${weeklyPct < 20 ? '周度预警' : '短期预警'}</span>`;
+      }
+
+      // Badge style
+      const badgeBg = ent.displayName.toLowerCase().includes('claude') ? 'bg-amber-950 text-amber-400 border border-amber-800/60' : 'bg-sky-950 text-sky-400 border border-sky-800/60';
+
+      entityBoxesHtml += `
+        <div class="bg-[#080c14] ${boxBorderClass} rounded-2xl p-4 flex flex-col items-center justify-between h-full">
+          <div class="w-full flex justify-between items-center">
+            <span class="px-2.5 py-1 text-xs font-bold ${badgeBg} rounded-md">${escapeHtml(ent.displayName.toUpperCase())}</span>
+            ${tagHtml}
           </div>
-          <div class="provider-rings-row">
-            ${rings}
+
+          <!-- 208px 巨型同心双环 SVG (ViewBox 0 0 120 120) -->
+          <div class="relative w-48 h-48 xl:w-52 xl:h-52 my-3 flex items-center justify-center">
+            <svg class="w-full h-full" viewBox="0 0 120 120">
+              <!-- 外环底轨与进度条 (5h 短期 R=52) -->
+              <circle cx="60" cy="60" r="52" fill="none" stroke="#152033" stroke-width="9"/>
+              <circle class="ring-circle" cx="60" cy="60" r="52" fill="none" stroke="${outerColor}" stroke-width="9" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="${offset1}"/>
+              <!-- 内环底轨与进度条 (7d 周度 R=38) -->
+              <circle cx="60" cy="60" r="38" fill="none" stroke="#152033" stroke-width="8"/>
+              <circle class="ring-circle" cx="60" cy="60" r="38" fill="none" stroke="${innerColor}" stroke-width="8" stroke-linecap="round" stroke-dasharray="238.7" stroke-dashoffset="${offset2}"/>
+            </svg>
+            <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
+              <span class="text-[11px] text-slate-400">5h 短期</span>
+              <span class="text-3xl font-extrabold ${shortPct < 20 ? 'text-amber-400' : 'text-white'} mono tracking-tight">${shortPct}%</span>
+              <span class="text-xs font-bold ${weeklyPct < 20 ? 'text-amber-300 bg-amber-950 border border-amber-600/50' : 'text-sky-400 bg-sky-950/60'} mono mt-1 px-2 py-0.5 rounded">7d: ${weeklyPct}%</span>
+            </div>
+          </div>
+
+          <!-- 环下方详情药丸框 -->
+          <div class="w-full space-y-2 text-xs border-t border-slate-800/80 pt-3">
+            <div class="flex justify-between items-center bg-slate-900/60 px-2.5 py-1.5 rounded-lg">
+              <span class="text-slate-300 flex items-center gap-1.5"><i class="w-2 h-2 rounded-full" style="background-color: ${outerColor};"></i>短期 (5h)</span>
+              <span class="${shortPct < 20 ? 'text-amber-400' : 'text-slate-300'} mono"><b>${shortPct}%</b> · ${formatDurationCompact(shortReset)}</span>
+            </div>
+            <div class="flex justify-between items-center ${weeklyPct < 20 ? 'bg-amber-950/40 border border-amber-800/40' : 'bg-slate-900/60'} px-2.5 py-1.5 rounded-lg">
+              <span class="${weeklyPct < 20 ? 'text-amber-300' : 'text-slate-300'} flex items-center gap-1.5"><i class="w-2 h-2 rounded-full" style="background-color: ${innerColor};"></i>周度 (7d)</span>
+              <span class="${weeklyPct < 20 ? 'text-amber-400' : 'text-slate-300'} mono"><b>${weeklyPct}%</b> · ${formatDurationCompact(weeklyReset)}</span>
+            </div>
           </div>
         </div>
       `;
     }
 
-    if (!groupsHtml) {
-      groupsHtml = '<div class="empty-placeholder" style="padding: 10px 14px; font-size: 12px; margin: 0;">该账号暂无配额限制数据</div>';
-    }
-
     html += `
-      <div class="account-quota-card compact-card">
-        <div class="account-card-header compact-header">
-          <div class="account-badge-email">
-            <span class="user-avatar-icon">👤</span>
-            <span class="account-email-text" title="${escapeHtml(email)}">${escapeHtml(displayEmail)}</span>
-          </div>
-          <div class="account-node-meta">
-            ${lastNode ? `<span>${escapeHtml(lastNode)}</span><span>·</span>` : ''}
-            <span>更新于: ${escapeHtml(updateTimeStr)}</span>
-          </div>
+      <div class="sub-card-bg rounded-2xl p-5 flex flex-col justify-between hover:border-slate-500 transition shadow-lg">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3.5 mb-5">
+          <span class="text-amber-400 font-bold text-base flex items-center gap-2 truncate" title="${escapeHtml(displayEmail)}">
+            👤 ${escapeHtml(displayEmail)}
+          </span>
+          <span class="text-xs text-slate-400 mono bg-slate-900/90 px-2.5 py-1 rounded shrink-0">${nodeId} · ${updatedStr}</span>
         </div>
-        <div class="quota-providers-flex">
-          ${groupsHtml}
+        <div class="grid ${entityColsClass} gap-4 flex-1 items-stretch">
+          ${entityBoxesHtml}
         </div>
       </div>
     `;
   }
 
   container.innerHTML = html;
+
+  // 未映射实体提示
+  const unmappedEl = document.getElementById('quota-unmapped-tip');
+  if (unmappedEl) {
+    if (unmappedFound.length > 0) {
+      unmappedEl.innerHTML = `检测到新前缀: <b>${escapeHtml(unmappedFound.join(', '))}</b> <button class="btn-action btn-sm ml-2" onclick="quickAddAlias('quota', '${escapeHtml(unmappedFound[0])}', '${escapeHtml(unmappedFound[0])}', '${escapeHtml(unmappedFound[0].slice(0, 2))}')">+ 快速映射</button>`;
+    } else {
+      unmappedEl.innerHTML = '';
+    }
+  }
 }
 
-// 别名管理表格渲染与 CRUD 操作
+// 3. 渲染终端会话列表 (按项目工作区 Workspace 聚合分组)
+function renderSessions(sessions, forceRedraw = false) {
+  const container = document.getElementById('sessions-container');
+  if (!container) return;
+
+  const stateToken = Array.from(expandedSessionIds).sort().join(',');
+  const cacheKey = JSON.stringify(sessions || []) + '|' + stateToken;
+  if (!forceRedraw && lastRenderCache.sessions === cacheKey) {
+    return;
+  }
+  lastRenderCache.sessions = cacheKey;
+
+  const sessList = sessions || [];
+  if (sessList.length === 0) {
+    container.innerHTML = `<div class="text-slate-400 text-sm p-4 text-center">暂未接收到任何会话遥测数据，请在终端中启动会话...</div>`;
+    setText('badge-sessions-count', '0 项目 · 0 会话');
+    return;
+  }
+
+  // 按项目路径分组聚合
+  const projectMap = new Map();
+  for (const s of sessList) {
+    let projPath = s.project_dir || s.cwd || '~';
+    // 统一处理 Windows 反斜杠以供分组
+    const normKey = projPath.replace(/\\/g, '/');
+    if (!projectMap.has(normKey)) {
+      projectMap.set(normKey, {
+        rawPath: projPath,
+        normPath: normKey,
+        sessions: [],
+        totalInput: 0,
+        totalOutput: 0,
+        nodes: new Set()
+      });
+    }
+    const group = projectMap.get(normKey);
+    group.sessions.push(s);
+    if (s.tokens) {
+      group.totalInput += s.tokens.total_input_tokens || 0;
+      group.totalOutput += s.tokens.total_output_tokens || 0;
+    }
+    if (s.node_id) {
+      group.nodes.add(s.node_id);
+    }
+  }
+
+  const projectGroups = Array.from(projectMap.values());
+  setText('badge-sessions-count', `${projectGroups.length} 项目 · ${sessList.length} 会话`);
+  setText('sessions-filter-tip', `${projectGroups.length} 个项目目录 · 共 ${sessList.length} 个会话`);
+
+  const agyCount = sessList.filter(s => s.source !== 'claudecode' && s.product_type !== 'claude_code').length;
+  const claudeCount = sessList.length - agyCount;
+  setHtml('val-sources', `${projectGroups.length} 个项目<br>${agyCount} agy / ${claudeCount} claude`);
+
+  // 分离单会话项目 (数量=1) 与多会话大项目 (数量>1)
+  const singleProjects = projectGroups.filter(g => g.sessions.length === 1);
+  const multiProjects = projectGroups.filter(g => g.sessions.length > 1);
+
+  let html = '';
+  let groupIndex = 1;
+
+  // 辅助函数：渲染单个会话卡片
+  function renderSessionCard(sess) {
+    const isClaude = sess.source === 'claudecode' || sess.product_type === 'claude_code';
+    const sourceClass = isClaude ? 'bg-amber-950 text-amber-300 border border-amber-800/60' : 'bg-teal-950 text-teal-300 border border-teal-800/60';
+    const sourceName = isClaude ? 'ClaudeCode' : 'Antigravity';
+    const isWorking = sess.agent_state === 'working';
+    const stateClass = isWorking ? 'bg-amber-950/60 text-amber-400' : 'bg-emerald-950/60 text-emerald-400';
+    const stateName = isWorking ? '⚡ 运行中' : '空闲';
+
+    const nodeId = sess.node_id || 'node_default';
+    const updatedRelative = formatRelativeTime(sess.timestamp);
+    const updatedClock = sess.timestamp ? new Date(sess.timestamp * 1000).toLocaleTimeString() : '--:--';
+    const updatedFull = sess.timestamp ? new Date(sess.timestamp * 1000).toLocaleString() : '--';
+
+    const inTokens = formatTokens(sess.tokens ? sess.tokens.total_input_tokens : 0);
+    const outTokens = formatTokens(sess.tokens ? sess.tokens.total_output_tokens : 0);
+    const rawMId = sess.model ? (sess.model.id || '') : '';
+    const rawMDisp = sess.model ? (sess.model.display_name || '') : '';
+    const matchedM = matchModelAlias(rawMId, rawMDisp);
+    const modelName = matchedM.name || rawMDisp || rawMId || 'Gemini';
+
+    const title = sess.conversation_title || sess.session_name || '默认终端会话';
+    const email = (sess.account && sess.account.email) ? sess.account.email : '';
+    const accAlias = matchAccountAlias(email);
+    const displayEmail = accAlias.matched && accAlias.name ? `${accAlias.name} (${email})` : (email || '本地匿名用户');
+
+    const sId = sess.session_id || sess.id || '';
+    const isExpanded = expandedSessionIds.has(sId);
+
+    // 上下文占比
+    let ctxPct = 0;
+    let ctxCap = '1M';
+    if (sess.context_window) {
+      ctxPct = Math.round(sess.context_window.used_percentage || 0);
+      const size = sess.context_window.context_window_size || 1048576;
+      ctxCap = size >= 1000000 ? `${(size / 1000000).toFixed(0)}M` : `${Math.round(size / 1000)}k`;
+    }
+
+    return `
+      <div data-node="${escapeHtml(nodeId)}" onclick="toggleSessionExpand('${escapeHtml(sId)}', event)" class="session-card sub-card-bg p-3.5 rounded-xl space-y-2 hover:border-sky-500/60 transition cursor-pointer">
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-1.5">
+            <span class="px-2 py-0.5 rounded ${sourceClass} text-[11px]">${sourceName}</span>
+            <span class="px-2 py-0.5 rounded ${stateClass} text-[11px]">${stateName}</span>
+          </div>
+          <span class="text-[11px] text-indigo-300 bg-indigo-950/60 px-2 py-0.5 rounded mono">${escapeHtml(nodeId)}</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="font-bold text-slate-200 text-xs truncate max-w-[200px]" title="${escapeHtml(displayEmail)}">👤 ${escapeHtml(displayEmail)}</span>
+          <span class="text-[11px] text-slate-400">${updatedRelative} (${updatedClock})</span>
+        </div>
+        <div class="flex justify-between items-center text-[11px] pt-0.5">
+          <span class="text-slate-300 truncate max-w-[160px]" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
+          <span class="text-sky-400 mono">[${escapeHtml(modelName)}]</span>
+        </div>
+        <div class="flex justify-between items-center pt-2 text-[11px] mono text-slate-400 border-t border-slate-800/80">
+          <span>输入 <b class="text-emerald-400">↑ ${inTokens}</b> · 输出 <b class="text-rose-400">↓ ${outTokens}</b></span>
+          <span>上下文 <b class="text-white">${ctxPct}% [${ctxCap}]</b></span>
+        </div>
+        ${isExpanded ? `
+          <div class="mt-3 pt-2.5 border-t border-slate-800 text-[11px] text-slate-400 space-y-1 mono bg-slate-950/40 p-2.5 rounded-lg">
+            <div>会话 ID: <span class="text-slate-300 select-all">${escapeHtml(sId)}</span></div>
+            ${sess.conversation_id ? `<div>对话 ID: <span class="text-slate-300 select-all">${escapeHtml(sess.conversation_id)}</span></div>` : ''}
+            <div>完整时间: <span class="text-slate-300">${escapeHtml(updatedFull)}</span></div>
+            ${sess.git_branch ? `<div>Git 分支: <span class="text-indigo-300">${escapeHtml(sess.git_branch)}${sess.git_dirty ? '*' : ''}</span></div>` : ''}
+            ${sess.account && sess.account.plan_tier ? `<div>账号计划: <span class="text-amber-400">${escapeHtml(sess.account.plan_tier)}</span></div>` : ''}
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  // 1) 渲染单会话项目 (在 3 列并排网格中)
+  if (singleProjects.length > 0) {
+    html += `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">`;
+    for (const group of singleProjects) {
+      const gId = `proj-${groupIndex++}`;
+      const pathParts = group.normPath.split('/');
+      const lastPart = pathParts.pop() || '';
+      const prefixPath = pathParts.length > 0 ? pathParts.join('/') + '/' : '';
+
+      html += `
+        <div class="project-group group-bg rounded-xl overflow-hidden flex flex-col justify-between border border-sky-900/40">
+          <div onclick="toggleGroup('${gId}')" class="bg-slate-900/90 px-4 py-3 border-b border-slate-800 flex items-center justify-between cursor-pointer hover:bg-slate-800/70 transition">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-amber-400 text-base">📂</span>
+              <div class="truncate">
+                <div class="text-xs font-bold text-sky-300 mono truncate" title="${escapeHtml(group.rawPath)}">
+                  ${escapeHtml(prefixPath)}<span class="text-white underline decoration-sky-500/60">${escapeHtml(lastPart)}</span>
+                </div>
+                <div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 mono">
+                  <span>1 个活跃会话</span> · <span>汇总: <b class="text-emerald-400">↑${formatTokens(group.totalInput)}</b> <b class="text-rose-400">↓${formatTokens(group.totalOutput)}</b></span>
+                </div>
+              </div>
+            </div>
+            <span id="icon-${gId}" class="text-slate-400 text-xs ml-2">▼</span>
+          </div>
+
+          <div id="${gId}" class="project-body p-3.5">
+            ${renderSessionCard(group.sessions[0])}
+          </div>
+        </div>
+      `;
+    }
+    html += `</div>`;
+  }
+
+  // 2) 渲染多会话大项目 (全屏独占大卡片，内部以 3 列网格排布)
+  for (const group of multiProjects) {
+    const gId = `proj-${groupIndex++}`;
+    const pathParts = group.normPath.split('/');
+    const lastPart = pathParts.pop() || '';
+    const prefixPath = pathParts.length > 0 ? pathParts.join('/') + '/' : '';
+
+    let cardsHtml = '';
+    for (const sess of group.sessions) {
+      cardsHtml += renderSessionCard(sess);
+    }
+
+    html += `
+      <div class="project-group group-bg rounded-xl overflow-hidden border border-slate-800 mt-4">
+        <div onclick="toggleGroup('${gId}')" class="bg-slate-900/90 px-5 py-3.5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 cursor-pointer hover:bg-slate-800/70 transition">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="text-amber-400 text-lg">📂</span>
+            <div class="truncate">
+              <div class="text-sm font-bold text-sky-300 mono flex items-center gap-2 truncate" title="${escapeHtml(group.rawPath)}">
+                <span class="truncate">${escapeHtml(prefixPath)}<span class="text-white underline decoration-sky-500/60">${escapeHtml(lastPart)}</span></span>
+                <span class="px-2 py-0.5 text-xs rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/60 shrink-0">${group.sessions.length} 个并发会话</span>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-5 text-xs mono text-slate-400 shrink-0">
+            <span>涉及节点: <b class="text-slate-200">${group.nodes.size} 个</b></span>
+            <span>项目总吞吐: <b class="text-emerald-400">↑ ${formatTokens(group.totalInput)}</b> <b class="text-rose-400">↓ ${formatTokens(group.totalOutput)}</b></span>
+            <span id="icon-${gId}" class="text-slate-400 text-xs">▼</span>
+          </div>
+        </div>
+
+        <div id="${gId}" class="project-body p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          ${cardsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+
+  // 如果当前有已选中的节点，执行过滤
+  if (selectedNodeId) {
+    filterSessions();
+  }
+}
+
+// 折叠/展开单个项目
+window.toggleGroup = function(id) {
+  const body = document.getElementById(id);
+  const icon = document.getElementById('icon-' + id);
+  if (!body) return;
+  const isHidden = body.classList.contains('hidden');
+  if (isHidden) {
+    body.classList.remove('hidden');
+    if (icon) icon.innerText = '▼';
+  } else {
+    body.classList.add('hidden');
+    if (icon) icon.innerText = '▶';
+  }
+};
+
+// 全部展开/折叠项目
+window.toggleAllProjects = function(expand) {
+  document.querySelectorAll('.project-body').forEach(body => {
+    const id = body.id;
+    const icon = document.getElementById('icon-' + id);
+    if (expand) {
+      body.classList.remove('hidden');
+      if (icon) icon.innerText = '▼';
+    } else {
+      body.classList.add('hidden');
+      if (icon) icon.innerText = '▶';
+    }
+  });
+};
+
+// 按物理节点过滤会话（自动隐藏没有匹配会话的项目组）
+window.filterSessions = function() {
+  const select = document.getElementById('node-filter-select');
+  const selected = select ? select.value : '';
+  selectedNodeId = selected;
+
+  document.querySelectorAll('.project-group').forEach(group => {
+    let visibleCount = 0;
+    group.querySelectorAll('.session-card').forEach(card => {
+      const node = card.getAttribute('data-node') || '';
+      if (!selected || node === selected) {
+        card.style.display = '';
+        visibleCount++;
+      } else {
+        card.style.display = 'none';
+      }
+    });
+    group.style.display = visibleCount > 0 ? '' : 'none';
+  });
+};
+
+// 切换单条会话详情卡片
+window.toggleSessionExpand = function(sessionId, event) {
+  if (event) event.stopPropagation();
+  if (expandedSessionIds.has(sessionId)) {
+    expandedSessionIds.delete(sessionId);
+  } else {
+    expandedSessionIds.add(sessionId);
+  }
+  // 重新渲染当前缓存的会话
+  if (lastRenderCache.rawSessions) {
+    renderSessions(lastRenderCache.rawSessions, true);
+  }
+};
+
+// 4. 渲染每日各模型 Token 表格
+function renderDailyTokensTable(rows, forceRedraw = false) {
+  const tbody = document.getElementById('daily-tokens-tbody');
+  if (!tbody) return;
+
+  const cacheKey = JSON.stringify(rows || []);
+  if (!forceRedraw && lastRenderCache.daily === cacheKey) {
+    return;
+  }
+  lastRenderCache.daily = cacheKey;
+
+  const items = rows || [];
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500">近 14 天暂无模型 Token 消耗记录</td></tr>`;
+    return;
+  }
+
+  // 计算每日常模吞吐与聚合
+  const dateGroups = new Map();
+  for (const r of items) {
+    const d = r.date || '未知日期';
+    if (!dateGroups.has(d)) {
+      dateGroups.set(d, {
+        date: d,
+        totalIn: 0,
+        totalOut: 0,
+        totalTokens: 0,
+        totalCost: 0,
+        models: []
+      });
+    }
+    const grp = dateGroups.get(d);
+    grp.totalIn += r.input_tokens || 0;
+    grp.totalOut += r.output_tokens || 0;
+    grp.totalTokens += r.total_tokens || 0;
+    grp.totalCost += r.cost_usd || 0;
+    grp.models.push(r);
+  }
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  let html = '';
+
+  for (const grp of dateGroups.values()) {
+    const isToday = grp.date === todayStr;
+    const dateLabel = isToday ? `📅 ${grp.date} (今日)` : `📅 ${grp.date}`;
+
+    // 汇总行
+    html += `
+      <tr class="bg-sky-950/20 font-semibold text-slate-200">
+        <td class="py-3 px-4 font-bold text-sky-400">${dateLabel}</td>
+        <td class="py-3 px-4 text-slate-300">当天各模型总计</td>
+        <td class="py-3 px-4 text-emerald-400">${formatTokens(grp.totalIn)}</td>
+        <td class="py-3 px-4 text-rose-400">${formatTokens(grp.totalOut)}</td>
+        <td class="py-3 px-4 font-bold text-white">${formatTokens(grp.totalTokens)}</td>
+        <td class="py-3 px-4">
+          <div class="text-[11px] text-slate-400 mb-1">当天总占比 100%</div>
+          <div class="bar-bg"><div class="bar-fill" style="width: 100%; background-color: var(--accent-sky);"></div></div>
+        </td>
+        <td class="py-3 px-4 text-right text-amber-400 font-bold">${formatUSD(grp.totalCost)}</td>
+      </tr>
+    `;
+
+    // 模型明细行
+    for (const m of grp.models) {
+      const alias = matchModelAlias(m.model, m.model);
+      const modelDisplayName = alias.matched && alias.name ? `${alias.name}` : m.model;
+      const isZero = (m.total_tokens || 0) === 0;
+      const pct = grp.totalTokens > 0 ? ((m.total_tokens / grp.totalTokens) * 100).toFixed(1) : '0.0';
+
+      html += `
+        <tr class="${isZero ? 'zero-row' : ''} hover:bg-slate-800/40 transition">
+          <td class="py-2.5 px-4 text-slate-500">${grp.date}</td>
+          <td class="py-2.5 px-4 text-slate-300 sub-row-cell">
+            ↳ <b>${escapeHtml(modelDisplayName)}</b>
+          </td>
+          <td class="py-2.5 px-4 text-slate-400">${formatTokens(m.input_tokens)}</td>
+          <td class="py-2.5 px-4 text-slate-400">${formatTokens(m.output_tokens)}</td>
+          <td class="py-2.5 px-4 font-bold text-slate-200">${formatTokens(m.total_tokens)}</td>
+          <td class="py-2.5 px-4">
+            <div class="text-[11px] text-slate-400 mb-0.5">${pct}%</div>
+            <div class="bar-bg"><div class="bar-fill" style="width: ${pct}%;"></div></div>
+          </td>
+          <td class="py-2.5 px-4 text-right text-slate-400">${formatUSD(m.cost_usd)}</td>
+        </tr>
+      `;
+    }
+  }
+
+  tbody.innerHTML = html;
+  toggleZeroRows();
+}
+
+window.toggleZeroRows = function() {
+  const checkbox = document.getElementById('toggle-zero');
+  const show = checkbox ? checkbox.checked : true;
+  document.querySelectorAll('.zero-row').forEach(row => {
+    row.style.display = show ? '' : 'none';
+  });
+};
+
+// 5. 调试原始上报 Master-Detail 布局
+async function loadDebugRawReports() {
+  const listContainer = document.getElementById('debug-list-container');
+  if (!listContainer) return;
+
+  try {
+    const res = await fetch(getApiUrl('api/v1/debug/raw?limit=5'), { headers: getAuthHeaders() });
+    if (!res.ok) {
+      listContainer.innerHTML = `<div class="text-rose-400 text-center py-4">获取调试数据失败: HTTP ${res.status}</div>`;
+      return;
+    }
+    const reports = await res.json();
+    rawReportsCache.clear();
+
+    if (!reports || reports.length === 0) {
+      listContainer.innerHTML = `<div class="text-slate-500 text-center py-4">暂无原始上报记录</div>`;
+      setText('badge-debug-count', '0');
+      return;
+    }
+
+    setText('badge-debug-count', reports.length);
+
+    let html = '';
+    for (let i = 0; i < reports.length; i++) {
+      const rep = reports[i];
+      const rId = rep.record_id || rep.id || (i + 1);
+      rawReportsCache.set(rId, rep);
+
+      const isLatest = i === 0;
+      const isSelected = (!currentDebugId && isLatest) || currentDebugId === rId;
+      if (isSelected) currentDebugId = rId;
+
+      const payload = rep.raw_payload || rep.envelope || {};
+      const product = rep.product_type || payload.product || 'antigravity';
+      const node = rep.node_id || 'node_default';
+      const mName = payload.model ? (payload.model.display_name || payload.model.id || '') : (rep.model_id || '');
+      const timeStr = rep.reported_at || rep.created_at || '--';
+
+      html += `
+        <button onclick="selectDebugRecord(${rId}, this)" class="debug-btn ${isSelected ? 'active' : ''} w-full text-left p-3.5 rounded-xl border border-slate-700 bg-slate-800/90 transition flex flex-col gap-1">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-sm">#${rId} ${isLatest ? '(最新上报)' : ''}</span>
+            <span class="px-2 py-0.5 rounded bg-black/30 text-[11px]">${escapeHtml(product)}</span>
+          </div>
+          <div class="text-slate-300 text-[11px]">${escapeHtml(timeStr)}</div>
+          <div class="text-slate-400 text-[11px] truncate">节点: ${escapeHtml(node)}${mName ? ' · ' + escapeHtml(mName) : ''}</div>
+        </button>
+      `;
+    }
+    listContainer.innerHTML = html;
+
+    // 显示选中的详情
+    if (currentDebugId && rawReportsCache.has(currentDebugId)) {
+      displayDebugDetail(rawReportsCache.get(currentDebugId));
+    }
+  } catch (e) {
+    listContainer.innerHTML = `<div class="text-rose-400 text-center py-4">加载异常: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+window.selectDebugRecord = function(recordId, btnEl) {
+  currentDebugId = recordId;
+  document.querySelectorAll('.debug-btn').forEach(b => b.classList.remove('active'));
+  if (btnEl) btnEl.classList.add('active');
+
+  if (rawReportsCache.has(recordId)) {
+    displayDebugDetail(rawReportsCache.get(recordId));
+  }
+};
+
+function displayDebugDetail(rep) {
+  const metaEl = document.getElementById('debug-meta');
+  const viewer = document.getElementById('json-viewer');
+  const rId = rep.record_id || rep.id || '--';
+  const timeStr = rep.reported_at || rep.created_at || '--';
+  if (metaEl) {
+    metaEl.textContent = `当前查看: #${rId} · ${timeStr} · 节点: ${rep.node_id || 'node_default'}`;
+  }
+  if (viewer) {
+    const rawData = rep.raw_payload || rep.envelope || rep;
+    viewer.innerHTML = syntaxHighlightJSON(rawData);
+  }
+}
+
+window.copyCurrentDebugJSON = function() {
+  if (!currentDebugId || !rawReportsCache.has(currentDebugId)) {
+    alert('暂无选中的原始上报数据');
+    return;
+  }
+  const rep = rawReportsCache.get(currentDebugId);
+  const rawData = rep.raw_payload || rep.envelope || rep;
+  const jsonStr = JSON.stringify(rawData, null, 2);
+  navigator.clipboard.writeText(jsonStr).then(() => {
+    const btn = document.getElementById('btn-copy-debug');
+    if (btn) {
+      const oldText = btn.innerHTML;
+      btn.innerHTML = '✓ 已复制到剪贴板';
+      setTimeout(() => { btn.innerHTML = oldText; }, 2000);
+    }
+  }).catch(e => {
+    alert('复制失败: ' + e.message);
+  });
+};
+
+// 6. 别名管理弹窗与 CRUD
+window.toggleAliasModal = function(show) {
+  isAliasesOpen = show;
+  const modal = document.getElementById('alias-modal');
+  if (!modal) return;
+  modal.classList.toggle('hidden', !show);
+  if (show) {
+    renderAliasTable();
+  }
+};
+
 function renderAliasTable() {
   const tbody = document.getElementById('alias-tbody');
   const thKey = document.getElementById('alias-th-key');
@@ -630,14 +990,13 @@ function renderAliasTable() {
 
   let html = '';
 
-  // 如果处于新增行状态，在顶部渲染输入框
   if (addingNewAlias) {
     html += `
-      <tr class="alias-edit-row">
-        <td><input id="input-new-key" class="alias-input" placeholder="输入匹配 Key / 前缀" value="${escapeHtml(newAliasPrefill.key || '')}"></td>
-        <td><input id="input-new-name" class="alias-input" placeholder="输入完整显示名 (宽屏 display_name)" value="${escapeHtml(newAliasPrefill.name || '')}"></td>
-        <td><input id="input-new-short" class="alias-input" placeholder="输入紧凑缩写 (窄屏 short_name)" value="${escapeHtml(newAliasPrefill.short || '')}"></td>
-        <td class="alias-actions-cell">
+      <tr class="bg-sky-950/20">
+        <td class="p-2.5"><input id="input-new-key" class="alias-input" placeholder="输入匹配 Key / 前缀" value="${escapeHtml(newAliasPrefill.key || '')}"></td>
+        <td class="p-2.5"><input id="input-new-name" class="alias-input" placeholder="输入完整显示名 (宽屏 display_name)" value="${escapeHtml(newAliasPrefill.name || '')}"></td>
+        <td class="p-2.5"><input id="input-new-short" class="alias-input" placeholder="输入紧凑缩写 (窄屏 short_name)" value="${escapeHtml(newAliasPrefill.short || '')}"></td>
+        <td class="p-2.5 text-right space-x-1">
           <button class="btn-action btn-sm btn-primary" onclick="confirmSaveNewAlias()">保存</button>
           <button class="btn-action btn-sm" onclick="cancelAddAlias()">取消</button>
         </td>
@@ -646,16 +1005,16 @@ function renderAliasTable() {
   }
 
   if (items.length === 0 && !addingNewAlias) {
-    html += `<tr><td colspan="4" class="table-empty">暂无 ${currentAliasTab} 映射规则，点击右上角「+ 新增映射」创建</td></tr>`;
+    html += `<tr><td colspan="4" class="py-8 text-center text-slate-500">暂无 ${currentAliasTab} 映射规则，点击右上角「+ 新增映射」创建</td></tr>`;
   } else {
     for (const item of items) {
       if (editingAliasKey === item.key) {
         html += `
-          <tr class="alias-edit-row">
-            <td><code>${escapeHtml(item.key)}</code></td>
-            <td><input id="input-edit-name" class="alias-input" value="${escapeHtml(item.name)}"></td>
-            <td><input id="input-edit-short" class="alias-input" value="${escapeHtml(item.short_name || '')}"></td>
-            <td class="alias-actions-cell">
+          <tr class="bg-sky-950/20">
+            <td class="p-2.5"><code>${escapeHtml(item.key)}</code></td>
+            <td class="p-2.5"><input id="input-edit-name" class="alias-input" value="${escapeHtml(item.name)}"></td>
+            <td class="p-2.5"><input id="input-edit-short" class="alias-input" value="${escapeHtml(item.short_name || '')}"></td>
+            <td class="p-2.5 text-right space-x-1">
               <button class="btn-action btn-sm btn-primary" onclick="confirmSaveEditAlias('${escapeHtml(item.key)}')">保存</button>
               <button class="btn-action btn-sm" onclick="cancelEditAlias()">取消</button>
             </td>
@@ -663,11 +1022,11 @@ function renderAliasTable() {
         `;
       } else {
         html += `
-          <tr>
-            <td><code>${escapeHtml(item.key)}</code></td>
-            <td><strong>${escapeHtml(item.name)}</strong></td>
-            <td><span class="badge-range">${escapeHtml(item.short_name || '--')}</span></td>
-            <td class="alias-actions-cell">
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="py-2.5 px-3"><code>${escapeHtml(item.key)}</code></td>
+            <td class="py-2.5 px-3"><strong>${escapeHtml(item.name)}</strong></td>
+            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-slate-800 text-sky-400 mono">${escapeHtml(item.short_name || '--')}</span></td>
+            <td class="py-2.5 px-3 text-right space-x-1">
               <button class="btn-action btn-sm" onclick="startEditAlias('${escapeHtml(item.key)}')">编辑</button>
               <button class="btn-action btn-sm btn-danger" onclick="confirmDeleteAlias('${escapeHtml(item.key)}')">删除</button>
             </td>
@@ -783,16 +1142,10 @@ window.confirmDeleteAlias = async function(key) {
 
 window.quickAddAlias = function(category, key, defaultName, defaultShort) {
   currentAliasTab = category;
-  isAliasesOpen = true;
+  toggleAliasModal(true);
   addingNewAlias = true;
   editingAliasKey = null;
   newAliasPrefill = { key, name: defaultName, short: defaultShort };
-
-  const modal = document.getElementById('alias-modal');
-  if (modal) {
-    modal.style.display = 'block';
-    modal.scrollIntoView({ behavior: 'smooth' });
-  }
 
   document.querySelectorAll('.alias-tab').forEach(tab => {
     tab.classList.toggle('active', tab.getAttribute('data-tab') === currentAliasTab);
@@ -805,401 +1158,162 @@ window.quickAddAlias = function(category, key, defaultName, defaultShort) {
   }, 100);
 };
 
-// 4. 渲染终端会话列表 (支持点击卡片展开详情，防重绘闪烁)
-function renderSessions(sessions, forceRedraw = false) {
-  const container = document.getElementById('sessions-container');
-  if (!container) return;
-
-  const stateToken = Array.from(expandedSessionIds).sort().join(',');
-  const cacheKey = JSON.stringify(sessions || []) + '|' + stateToken;
-  if (!forceRedraw && lastRenderCache.sessions === cacheKey) {
-    return; // 无数据或展开状态变化，跳过重绘
-  }
-  lastRenderCache.sessions = cacheKey;
-
-  if (!sessions || sessions.length === 0) {
-    const filterTip = selectedNodeId ? `节点 [${escapeHtml(selectedNodeId)}] 下暂无活跃会话` : '暂未接收到任何会话遥测数据';
-    container.innerHTML = `<div class="empty-placeholder">${filterTip}</div>`;
-    return;
-  }
-
-  let html = '';
-  for (const sess of sessions) {
-    const isClaude = sess.source === 'claudecode' || sess.product_type === 'claude_code';
-    const sourceClass = isClaude ? 'source-claude' : 'source-agy';
-    const sourceName = isClaude ? 'ClaudeCode' : 'Antigravity';
-    const isWorking = sess.agent_state === 'working';
-    const stateClass = isWorking ? 'state-pill-working' : 'state-pill-idle';
-    const stateName = isWorking ? '⚡ 运行中' : '空闲';
-
-    const nodeBadge = sess.node_id ? `<span class="node-badge">🖥️ ${escapeHtml(sess.node_id)}</span>` : '';
-    const updatedRelative = formatRelativeTime(sess.timestamp);
-    const updatedClock = sess.timestamp ? new Date(sess.timestamp * 1000).toLocaleTimeString() : '--:--';
-    const updatedFull = sess.timestamp ? new Date(sess.timestamp * 1000).toLocaleString() : '--';
-
-    const inTokens = formatTokens(sess.tokens ? sess.tokens.total_input_tokens : 0);
-    const outTokens = formatTokens(sess.tokens ? sess.tokens.total_output_tokens : 0);
-    const rawMId = sess.model ? (sess.model.id || '') : '';
-    const rawMDisp = sess.model ? (sess.model.display_name || '') : '';
-    const matchedM = matchModelAlias(rawMId, rawMDisp);
-    const modelName = matchedM.name || rawMDisp || rawMId || 'Gemini';
-
-    const title = sess.conversation_title || sess.session_name || '默认终端会话';
-    const email = (sess.account && sess.account.email) ? sess.account.email : '';
-    const planTier = (sess.account && sess.account.plan_tier) ? sess.account.plan_tier : '';
-    const accAlias = matchAccountAlias(email);
-    const displayAcc = accAlias.name || email;
-    const accountBadge = email ? `<span class="account-badge" title="${escapeHtml(email)}">👤 ${escapeHtml(displayAcc)}</span>` : '';
-    const ctxPct = sess.context_window ? Math.round(sess.context_window.used_percentage) : 0;
-    const ctxSize = sess.context_window && sess.context_window.context_window_size ? formatTokens(sess.context_window.context_window_size) : '1M';
-    const cost = formatUSD(sess.cost_usd);
-
-    const isExpanded = expandedSessionIds.has(sess.session_id);
-    const boxClass = isExpanded ? 'session-box expanded' : 'session-box';
-
-    html += `
-      <div class="${boxClass}" data-session-id="${escapeHtml(sess.session_id)}">
-        <div class="session-top">
-          <div class="session-tags">
-            <span class="tag-badge ${sourceClass}">${escapeHtml(sourceName)}</span>
-            <span class="tag-badge ${stateClass}">${escapeHtml(stateName)}</span>
-            ${nodeBadge}
-            ${accountBadge}
-          </div>
-          <div class="session-expand-hint" title="点击展开/收起完整调试信息">
-            <span class="chevron">▶</span>
-            <span class="time-stamp">${updatedRelative}</span>
-          </div>
-        </div>
-        <div class="session-mid">
-          <span class="session-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
-          <span class="model-pill">[${escapeHtml(modelName)}]</span>
-        </div>
-        <div class="session-path" title="${escapeHtml(sess.cwd || '~')}">📂 ${escapeHtml(sess.cwd || '~')}</div>
-        <div class="session-stats-bar">
-          <div>输入: <span class="metric-val">↑${inTokens}</span></div>
-          <div>输出: <span class="metric-val">↓${outTokens}</span></div>
-          <div>上下文: <span class="metric-val">${ctxPct}% [${ctxSize}]</span></div>
-          <div>费用: <span class="metric-val">${cost}</span></div>
-        </div>
-
-        <!-- 详细抽屉 (点击卡片展开) -->
-        <div class="session-detail-drawer">
-          <div class="detail-grid">
-            <div class="detail-item">
-              <span class="detail-key">会话 ID (Session ID)</span>
-              <span class="detail-val">${escapeHtml(sess.session_id)}</span>
-            </div>
-            ${sess.conversation_id ? `
-            <div class="detail-item">
-              <span class="detail-key">对话 ID (Conversation ID)</span>
-              <span class="detail-val">${escapeHtml(sess.conversation_id)}</span>
-            </div>` : ''}
-            <div class="detail-item">
-              <span class="detail-key">物理节点 (Node)</span>
-              <span class="detail-val">${escapeHtml(sess.node_id || '--')}</span>
-            </div>
-            <div class="detail-item">
-              <span class="detail-key">最后活跃时间 (Last Active)</span>
-              <span class="detail-val">${escapeHtml(updatedFull)}</span>
-            </div>
-            ${planTier ? `
-            <div class="detail-item">
-              <span class="detail-key">账户计划 (Plan Tier)</span>
-              <span class="detail-val">${escapeHtml(planTier)}</span>
-            </div>` : ''}
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  container.innerHTML = html;
-
-  // 绑定卡片点击展开事件
-  container.querySelectorAll('.session-box').forEach(box => {
-    box.addEventListener('click', (e) => {
-      // 避免选中文字时触发折叠
-      const selection = window.getSelection();
-      if (selection && selection.toString().length > 0) return;
-
-      const sid = box.getAttribute('data-session-id');
-      if (!sid) return;
-      if (expandedSessionIds.has(sid)) {
-        expandedSessionIds.delete(sid);
-      } else {
-        expandedSessionIds.add(sid);
-      }
-      renderSessions(sessions, true);
-    });
-  });
-}
-
-// 5. 调试原始上报抽屉 (语法高亮与安全内存复制)
-async function loadDebugData() {
-  const container = document.getElementById('debug-container');
-  if (!container) return;
-
-  try {
-    const res = await fetch(getApiUrl('api/v1/debug/raw?limit=5'));
-    if (!res.ok) {
-      container.innerHTML = '<div class="empty-placeholder">获取调试数据失败</div>';
-      return;
-    }
-    const reports = await res.json();
-    if (!reports || reports.length === 0) {
-      container.innerHTML = '<div class="empty-placeholder">暂无任何上报事件记录</div>';
-      return;
-    }
-
-    rawReportsCache.clear();
-    let html = '';
-    for (const r of reports) {
-      const jsonFormatted = JSON.stringify(r.raw_payload, null, 2);
-      rawReportsCache.set(String(r.id), jsonFormatted);
-
-      html += `
-        <div class="debug-card">
-          <div class="debug-card-header">
-            <div class="debug-meta">
-              <strong>#${r.id}</strong>
-              <span>${escapeHtml(r.reported_at)}</span>
-              <span>节点: ${escapeHtml(r.node_id)}</span>
-              <span>产品: ${escapeHtml(r.product_type)}</span>
-              <span>模型: ${escapeHtml(r.model_id)}</span>
-            </div>
-            <button class="btn-action btn-sm btn-copy" data-report-id="${r.id}">复制 JSON</button>
-          </div>
-          <pre class="debug-json"><code>${syntaxHighlightJSON(r.raw_payload)}</code></pre>
-        </div>
-      `;
-    }
-    container.innerHTML = html;
-
-    // 绑定复制按钮 (直接从内存缓存提取，避免超长 DOM 属性)
-    container.querySelectorAll('.btn-copy').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const rid = btn.getAttribute('data-report-id');
-        const json = rawReportsCache.get(rid) || '';
-        navigator.clipboard.writeText(json).then(() => {
-          btn.textContent = '已复制!';
-          setTimeout(() => { btn.textContent = '复制 JSON'; }, 1500);
-        });
-      });
-    });
-
-  } catch (e) {
-    container.innerHTML = `<div class="empty-placeholder">加载异常: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-// 6. 全局定时刷新总逻辑
+// 7. 全局看板数据拉取与刷新
 async function refreshDashboard(forceRedraw = false) {
   try {
-    const sessionsPath = selectedNodeId
-      ? `api/v1/sessions?node_id=${encodeURIComponent(selectedNodeId)}`
-      : 'api/v1/sessions';
+    const overviewPromise = fetch(getApiUrl('api/v1/overview'));
+    const tokensDailyPromise = fetch(getApiUrl('api/v1/tokens/daily?days=14'));
+    const quotasPromise = fetch(getApiUrl('api/v1/quotas'));
+    const sessionsPromise = fetch(getApiUrl('api/v1/sessions'));
 
     const [overviewRes, dailyRes, quotasRes, sessionsRes] = await Promise.all([
-      fetch(getApiUrl('api/v1/overview')),
-      fetch(getApiUrl('api/v1/tokens/daily?days=14')),
-      fetch(getApiUrl('api/v1/quotas')),
-      fetch(getApiUrl(sessionsPath))
+      overviewPromise, tokensDailyPromise, quotasPromise, sessionsPromise
     ]);
 
-    if (!overviewRes.ok || !sessionsRes.ok) {
-      setConnectionState(false, '服务异常');
+    if (!overviewRes.ok || !dailyRes.ok || !quotasRes.ok || !sessionsRes.ok) {
+      setConnectionState(false, '服务响应异常');
       return;
     }
-
-    const overview = await overviewRes.json();
-    const dailyTokens = dailyRes.ok ? await dailyRes.json() : [];
-    const accountQuotas = quotasRes.ok ? await quotasRes.json() : [];
-    const sessions = await sessionsRes.json();
 
     setConnectionState(true, '已连接');
     setText('last-updated', new Date().toLocaleTimeString());
 
-    // 顶部卡片更新
-    setText('val-sessions', overview.active_sessions_count || 0);
-    const agyCount = (overview.source_breakdown && overview.source_breakdown.antigravity) || 0;
-    const claudeCount = (overview.source_breakdown && overview.source_breakdown.claudecode) || 0;
-    setText('val-sources', `${agyCount} agy · ${claudeCount} claude`);
+    const overview = await overviewRes.json();
+    const dailyTokens = await dailyRes.json();
+    const quotas = await quotasRes.json();
+    const sessions = await sessionsRes.json();
 
-    // 今日 Token
+    lastRenderCache.rawSessions = sessions;
+
+    // 更新 Header 指标
+    const totalSessions = overview.active_sessions || 0;
+    setText('val-sessions', totalSessions);
+    const agyCount = overview.antigravity_sessions || 0;
+    const claudeCount = overview.claude_sessions || 0;
+    setText('val-sources', `${agyCount} agy / ${claudeCount} claude`);
+
+    // 计算今日消耗 Token
+    let todayTokens = 0;
+    let todayInput = 0;
+    let todayOutput = 0;
     const todayStr = new Date().toISOString().slice(0, 10);
-    const todaySummary = (dailyTokens && dailyTokens.find(d => d.date === todayStr)) || null;
-    const todayTokens = todaySummary ? todaySummary.total_tokens : 0;
-    const todayIn = todaySummary ? todaySummary.total_input_tokens : 0;
-    const todayOut = todaySummary ? todaySummary.total_output_tokens : 0;
+    if (dailyTokens && Array.isArray(dailyTokens)) {
+      for (const row of dailyTokens) {
+        if (row.date === todayStr) {
+          todayInput += (row.input_tokens || 0);
+          todayOutput += (row.output_tokens || 0);
+          todayTokens += (row.total_tokens || 0);
+        }
+      }
+    }
+
     setText('val-tokens-today', formatTokens(todayTokens));
-    setText('val-tokens-today-detail', `输入 ↑${formatTokens(todayIn)} · 输出 ↓${formatTokens(todayOut)}`);
+    setText('badge-tokens-count', formatTokens(todayTokens));
+    setHtml('val-tokens-today-detail', `↑${formatTokens(todayInput)}<br>↓${formatTokens(todayOutput)}`);
 
-    // 历史总 Token
-    setText('val-tokens-total', formatTokens(overview.total_tokens || 0));
-    setText('val-cost-total', `累计估算: ${formatUSD(overview.total_cost_usd || 0)}`);
+    const totalTokens = overview.total_tokens || overview.tokens_total || 0;
+    setText('val-tokens-total', formatTokens(totalTokens));
+    setText('val-cost-total', formatUSD(overview.total_cost_usd || overview.cost_total_usd || 0));
 
-    // 节点数与账号数
-    const nodeCount = overview.active_nodes_count || knownNodes.length || 0;
-    setText('val-nodes', nodeCount);
-    setText('val-nodes-sub', `${nodeCount} 个在线节点`);
+    setText('val-nodes', overview.active_nodes || 0);
 
-    const accountCount = accountQuotas.length || (overview.latest_account && overview.latest_account.email ? 1 : 0);
-    setText('val-accounts', accountCount);
-    setText('val-accounts-sub', `${accountCount} 个已上报账号`);
-
-    // 渲染每日各模型 Token 表格
+    // 渲染各模块
+    renderAccountQuotas(quotas, forceRedraw);
+    renderSessions(sessions, forceRedraw);
     renderDailyTokensTable(dailyTokens, forceRedraw);
 
-    // 渲染按账号区分的配额池
-    renderAccountQuotas(accountQuotas, forceRedraw);
-
-    // 渲染会话列表
-    renderSessions(sessions, forceRedraw);
-
-  } catch (err) {
-    console.error('[statusline] refreshDashboard error:', err);
+    if (activeMainTab === 'tab-debug') {
+      loadDebugRawReports();
+    }
+  } catch (e) {
+    console.error('[statusline] refresh error:', e);
     setConnectionState(false, '连接中断');
   }
 }
 
-// 调度下一次定时刷新 (10s 间隔，页面隐藏时静默暂停)
-function scheduleNextRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(async () => {
-    if (!document.hidden) {
-      await refreshDashboard();
-    }
-    scheduleNextRefresh();
-  }, 10000);
-}
-
-// 7. 事件绑定与初始化
-function init() {
-  loadNodes();
-  loadAliases();
-  refreshDashboard(true);
-  scheduleNextRefresh();
-
-  // 监听页面前后台切换
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      refreshDashboard();
-      scheduleNextRefresh();
-    }
+// 事件绑定与初始化
+document.addEventListener('DOMContentLoaded', async () => {
+  // 别名 Tab 切换
+  document.querySelectorAll('.alias-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.alias-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentAliasTab = tab.getAttribute('data-tab');
+      addingNewAlias = false;
+      editingAliasKey = null;
+      renderAliasTable();
+    });
   });
 
-  // 节点筛选下拉事件
-  const nodeSelect = document.getElementById('node-filter-select');
-  if (nodeSelect) {
-    nodeSelect.addEventListener('change', (e) => {
-      selectedNodeId = e.target.value;
-      refreshDashboard(true);
-    });
-  }
-
-  // 立即刷新按钮 (使用 try...finally 精确控制按钮状态)
-  const btnRefresh = document.getElementById('btn-manual-refresh');
-  if (btnRefresh) {
-    btnRefresh.addEventListener('click', async () => {
-      btnRefresh.disabled = true;
-      btnRefresh.textContent = '刷新中...';
-      try {
-        await fetch(getApiUrl('api/v1/refresh'), { method: 'POST' });
-        await loadNodes();
-        await loadAliases();
-        await refreshDashboard(true);
-        if (isDebugOpen) await loadDebugData();
-      } catch (e) {
-        console.error('[statusline] manual refresh error:', e);
-      } finally {
-        btnRefresh.textContent = '⟳ 立即刷新';
-        btnRefresh.disabled = false;
-      }
-    });
-  }
-
-  // 别名映射面板切换与操作
-  const btnToggleAliases = document.getElementById('btn-toggle-aliases');
-  const btnCloseAlias = document.getElementById('btn-close-alias');
-  const aliasModal = document.getElementById('alias-modal');
-  const btnAddAlias = document.getElementById('btn-add-alias');
-
-  if (btnToggleAliases && aliasModal) {
-    btnToggleAliases.addEventListener('click', async () => {
-      isAliasesOpen = !isAliasesOpen;
-      aliasModal.style.display = isAliasesOpen ? 'block' : 'none';
-      if (isAliasesOpen) {
-        await loadAliases();
-        renderAliasTable();
-        aliasModal.scrollIntoView({ behavior: 'smooth' });
-      }
-    });
-  }
-
-  if (btnCloseAlias && aliasModal) {
-    btnCloseAlias.addEventListener('click', () => {
-      isAliasesOpen = false;
-      aliasModal.style.display = 'none';
-    });
-  }
-
-  if (btnAddAlias) {
-    btnAddAlias.addEventListener('click', () => {
+  const btnAdd = document.getElementById('btn-add-alias');
+  if (btnAdd) {
+    btnAdd.addEventListener('click', () => {
       addingNewAlias = true;
       editingAliasKey = null;
       newAliasPrefill = { key: '', name: '', short: '' };
       renderAliasTable();
       setTimeout(() => {
-        const kInput = document.getElementById('input-new-key');
-        if (kInput) kInput.focus();
+        const inputKey = document.getElementById('input-new-key');
+        if (inputKey) inputKey.focus();
       }, 50);
     });
   }
 
-  // 别名 Tab 切换
-  document.querySelectorAll('.alias-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      const targetTab = tab.getAttribute('data-tab');
-      if (!targetTab || targetTab === currentAliasTab) return;
-      currentAliasTab = targetTab;
-      addingNewAlias = false;
-      editingAliasKey = null;
-      document.querySelectorAll('.alias-tab').forEach(t => {
-        t.classList.toggle('active', t.getAttribute('data-tab') === currentAliasTab);
-      });
-      renderAliasTable();
-    });
-  });
-
-  // 调试面板切换
-  const btnToggleDebug = document.getElementById('btn-toggle-debug');
-  const btnCloseDebug = document.getElementById('btn-close-debug');
-  const debugDrawer = document.getElementById('debug-drawer');
-
-  if (btnToggleDebug && debugDrawer) {
-    btnToggleDebug.addEventListener('click', () => {
-      isDebugOpen = !isDebugOpen;
-      debugDrawer.style.display = isDebugOpen ? 'block' : 'none';
-      if (isDebugOpen) {
-        loadDebugData();
-        debugDrawer.scrollIntoView({ behavior: 'smooth' });
+  // 手动刷新按钮
+  const btnRefresh = document.getElementById('btn-manual-refresh');
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', async () => {
+      btnRefresh.disabled = true;
+      const oldHtml = btnRefresh.innerHTML;
+      btnRefresh.innerHTML = '↻ 刷新中...';
+      try {
+        await loadAliases();
+        await loadNodes();
+        await refreshDashboard(true);
+      } finally {
+        btnRefresh.innerHTML = oldHtml;
+        btnRefresh.disabled = false;
       }
     });
   }
 
-  if (btnCloseDebug && debugDrawer) {
-    btnCloseDebug.addEventListener('click', () => {
-      isDebugOpen = false;
-      debugDrawer.style.display = 'none';
+  // 节点下拉选择变更
+  const nodeSelect = document.getElementById('node-filter-select');
+  if (nodeSelect) {
+    nodeSelect.addEventListener('change', () => {
+      filterSessions();
     });
   }
-}
 
-// 确保无论脚本在何种时机执行（loading / interactive / complete），都能立即初始化
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
+  // 初始化拉取
+  await loadAliases();
+  await loadNodes();
+  await refreshDashboard(true);
+
+  // 定时刷新 (10s)
+  function startPolling() {
+    stopPolling();
+    refreshTimer = setInterval(() => {
+      refreshDashboard(false);
+    }, 10000);
+  }
+
+  function stopPolling() {
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+  }
+
+  startPolling();
+
+  // 页面隐藏时暂停轮询，恢复时立即刷新并重启轮询
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopPolling();
+    } else {
+      refreshDashboard(false);
+      startPolling();
+    }
+  });
+});
