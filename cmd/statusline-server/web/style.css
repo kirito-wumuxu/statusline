@@ -149,6 +149,51 @@ body {
   border: 1px solid var(--border-slate-800);
 }
 
+/* Quota Pool Dynamic Cards (Model Unit as Minimum Atomic Block) */
+.quota-unit-box {
+  width: 260px;
+  min-width: 260px;
+  flex: 0 0 260px;
+  background-color: #080c14;
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+
+.account-quota-card {
+  flex: 0 0 auto;
+  max-width: 100%;
+  display: inline-flex;
+  flex-direction: column;
+  background-color: var(--sub-card-bg);
+  border: 1px solid #223049;
+  border-radius: 16px;
+  padding: 20px;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.account-quota-card:hover {
+  border-color: #64748b;
+}
+
+@media (max-width: 640px) {
+  .account-quota-card {
+    width: 100%;
+  }
+  .account-quota-card .flex-row {
+    flex-direction: column;
+  }
+  .quota-unit-box {
+    width: 100%;
+    min-width: unset;
+    flex: 1 1 auto;
+  }
+}
+
 .border { border-width: 1px; border-style: solid; }
 .border-t { border-top-width: 1px; border-top-style: solid; }
 .border-b { border-bottom-width: 1px; border-bottom-style: solid; }

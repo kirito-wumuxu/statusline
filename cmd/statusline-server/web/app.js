@@ -304,7 +304,7 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
   setText('val-accounts-sub', `${accounts.length} 个上报账号`);
 
   if (accounts.length === 0) {
-    container.innerHTML = `<div class="text-slate-400 text-sm p-4 col-span-3 text-center">暂未检测到配额信息，终端会话产生交互后将自动同步...</div>`;
+    container.innerHTML = `<div class="text-slate-400 text-sm p-4 w-full text-center">暂未检测到配额信息，终端会话产生交互后将自动同步...</div>`;
     return;
   }
 
@@ -414,7 +414,7 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
       const badgeBg = ent.displayName.toLowerCase().includes('claude') ? 'bg-amber-950 text-amber-400 border border-amber-800/60' : 'bg-sky-950 text-sky-400 border border-sky-800/60';
 
       entityBoxesHtml += `
-        <div class="bg-[#080c14] ${boxBorderClass} rounded-2xl p-4 flex flex-col items-center justify-between h-full">
+        <div class="quota-unit-box ${boxBorderClass}">
           <div class="w-full flex justify-between items-center">
             <span class="px-2.5 py-1 text-xs font-bold ${badgeBg} rounded-md">${escapeHtml(ent.displayName.toUpperCase())}</span>
             ${tagHtml}
@@ -453,14 +453,14 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
     }
 
     html += `
-      <div class="sub-card-bg rounded-2xl p-5 flex flex-col justify-between hover:border-slate-500 transition shadow-lg">
-        <div class="flex items-center justify-between border-b border-slate-800 pb-3.5 mb-5">
-          <span class="text-amber-400 font-bold text-base flex items-center gap-2 truncate" title="${escapeHtml(displayEmail)}">
+      <div class="account-quota-card shadow-lg">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-3 w-full">
+          <span class="text-amber-400 font-bold text-base flex items-center gap-2 truncate max-w-[280px]" title="${escapeHtml(displayEmail)}">
             👤 ${escapeHtml(displayEmail)}
           </span>
           <span class="text-xs text-slate-400 mono bg-slate-900/90 px-2.5 py-1 rounded shrink-0">${nodeId} · ${updatedStr}</span>
         </div>
-        <div class="grid ${entityColsClass} gap-4 flex-1 items-stretch">
+        <div class="flex flex-row flex-wrap gap-4 items-stretch">
           ${entityBoxesHtml}
         </div>
       </div>
