@@ -304,7 +304,7 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
   setText('val-accounts-sub', `${accounts.length} 个上报账号`);
 
   if (accounts.length === 0) {
-    container.innerHTML = `<div class="text-slate-400 text-sm p-4 w-full text-center">暂未检测到配额信息，终端会话产生交互后将自动同步...</div>`;
+    container.innerHTML = `<div class="text-slate-400 text-sm p-4 col-span-full text-center">暂未检测到配额信息，终端会话产生交互后将自动同步...</div>`;
     return;
   }
 
@@ -356,7 +356,20 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
     }
 
     const entities = Array.from(entityMap.values());
-    const entityColsClass = entities.length <= 1 ? 'grid-cols-1' : entities.length === 2 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-3';
+    const numEntities = entities.length;
+    let spanClass = 'account-span-1';
+    let insideColsClass = 'grid-cols-1';
+
+    if (numEntities === 2) {
+      spanClass = 'account-span-2';
+      insideColsClass = 'grid-cols-1 sm:grid-cols-2';
+    } else if (numEntities === 3) {
+      spanClass = 'account-span-3';
+      insideColsClass = 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
+    } else if (numEntities >= 4) {
+      spanClass = 'account-span-4';
+      insideColsClass = 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4';
+    }
 
     let entityBoxesHtml = '';
     for (const ent of entities) {
@@ -420,8 +433,8 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
             ${tagHtml}
           </div>
 
-          <!-- 208px 巨型同心双环 SVG (ViewBox 0 0 120 120) -->
-          <div class="relative w-48 h-48 xl:w-52 xl:h-52 my-3 flex items-center justify-center">
+          <!-- 巨型同心双环 SVG (自动适配至 180px~204px) -->
+          <div class="quota-ring-svg-wrap my-3">
             <svg class="w-full h-full" viewBox="0 0 120 120">
               <!-- 外环底轨与进度条 (5h 短期 R=52) -->
               <circle cx="60" cy="60" r="52" fill="none" stroke="#152033" stroke-width="9"/>
@@ -453,14 +466,14 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
     }
 
     html += `
-      <div class="account-quota-card shadow-lg">
+      <div class="account-quota-card ${spanClass} shadow-lg">
         <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-3 w-full">
           <span class="text-amber-400 font-bold text-base flex items-center gap-2 truncate max-w-[280px]" title="${escapeHtml(displayEmail)}">
             👤 ${escapeHtml(displayEmail)}
           </span>
           <span class="text-xs text-slate-400 mono bg-slate-900/90 px-2.5 py-1 rounded shrink-0">${nodeId} · ${updatedStr}</span>
         </div>
-        <div class="flex flex-row flex-wrap gap-4 items-stretch">
+        <div class="grid ${insideColsClass} gap-4 flex-1 items-stretch">
           ${entityBoxesHtml}
         </div>
       </div>

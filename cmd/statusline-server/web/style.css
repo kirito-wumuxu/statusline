@@ -149,11 +149,56 @@ body {
   border: 1px solid var(--border-slate-800);
 }
 
-/* Quota Pool Dynamic Cards (Model Unit as Minimum Atomic Block) */
+/* Quota Pool 4-Unit Grid & Dynamic Account Cards */
+.quotas-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 20px;
+  align-items: stretch;
+}
+
+.col-span-full {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 768px) {
+  .quotas-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .account-span-1 { grid-column: span 1; }
+  .account-span-2 { grid-column: span 2; }
+  .account-span-3 { grid-column: span 2; }
+  .account-span-4 { grid-column: span 2; }
+}
+
+@media (min-width: 1200px) {
+  .quotas-grid-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .account-span-1 { grid-column: span 1; }
+  .account-span-2 { grid-column: span 2; }
+  .account-span-3 { grid-column: span 3; }
+  .account-span-4 { grid-column: span 4; }
+}
+
+.account-quota-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background-color: var(--sub-card-bg);
+  border: 1px solid #223049;
+  border-radius: 16px;
+  padding: 20px;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  height: 100%;
+}
+.account-quota-card:hover {
+  border-color: #64748b;
+}
+
 .quota-unit-box {
-  width: 260px;
-  min-width: 260px;
-  flex: 0 0 260px;
+  width: 100%;
   background-color: #080c14;
   border-radius: 16px;
   padding: 16px;
@@ -162,35 +207,23 @@ body {
   align-items: center;
   justify-content: space-between;
   box-sizing: border-box;
+  height: 100%;
 }
 
-.account-quota-card {
-  flex: 0 0 auto;
-  max-width: 100%;
-  display: inline-flex;
-  flex-direction: column;
-  background-color: var(--sub-card-bg);
-  border: 1px solid #223049;
-  border-radius: 16px;
-  padding: 20px;
-  box-sizing: border-box;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.account-quota-card:hover {
-  border-color: #64748b;
+.quota-ring-svg-wrap {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  margin: 12px auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-@media (max-width: 640px) {
-  .account-quota-card {
-    width: 100%;
-  }
-  .account-quota-card .flex-row {
-    flex-direction: column;
-  }
-  .quota-unit-box {
-    width: 100%;
-    min-width: unset;
-    flex: 1 1 auto;
+@media (min-width: 1400px) {
+  .quota-ring-svg-wrap {
+    width: 204px;
+    height: 204px;
   }
 }
 
