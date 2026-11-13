@@ -72,6 +72,65 @@ function getAuthHeaders() {
   return headers;
 }
 
+function updateApiKeyBtnText() {
+  const hasKey = !!localStorage.getItem('statusline_api_key');
+  const btnHeader = document.getElementById('btn-set-api-key');
+  if (btnHeader) {
+    btnHeader.innerHTML = hasKey ? '🔑 密钥已存' : '🔑 密钥';
+    btnHeader.className = hasKey
+      ? 'px-3 py-1.5 rounded-lg bg-amber-950/60 text-amber-300 border border-amber-800/60 hover:bg-amber-900/60 transition'
+      : 'px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition';
+  }
+  const btnModal = document.getElementById('btn-set-api-key-modal');
+  if (btnModal) {
+    btnModal.innerHTML = hasKey ? '🔑 密钥已存' : '🔑 密钥';
+    btnModal.className = hasKey
+      ? 'btn-action text-amber-300 border-amber-800/80 bg-amber-950/40 hover:bg-amber-900/60'
+      : 'btn-action text-slate-300 border-slate-700 hover:bg-slate-800';
+  }
+}
+
+window.promptApiKey = function() {
+  const currentKey = localStorage.getItem('statusline_api_key') || '';
+  const newKey = prompt('请输入 statusline-server 服务端 (server.yaml) 中配置的 API Key 认证密钥:\n(如未开启或需清除请直接清空保存)', currentKey);
+  if (newKey !== null) {
+    const trimmed = newKey.trim();
+    if (trimmed) {
+      localStorage.setItem('statusline_api_key', trimmed);
+    } else {
+      localStorage.removeItem('statusline_api_key');
+    }
+    updateApiKeyBtnText();
+    loadAliases();
+    refreshDashboard(true);
+  }
+};
+
+async function requestWithAuth(url, options = {}) {
+  options.headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+  let res = await fetch(url, options);
+  if (res.status === 401) {
+    const currentKey = localStorage.getItem('statusline_api_key') || '';
+    const promptMsg = currentKey
+      ? '当前已配置的 API Key 鉴权失败 (401 Unauthorized)。\n请输入服务端 (server.yaml) 正确配置的 API Key 认证密钥:'
+      : '服务端已开启安全密钥认证 (401 Unauthorized)。\n请输入服务端 (server.yaml) 中配置的 API Key 认证密钥:';
+    const entered = prompt(promptMsg, currentKey);
+    if (entered !== null) {
+      const trimmed = entered.trim();
+      if (trimmed) {
+        localStorage.setItem('statusline_api_key', trimmed);
+      } else {
+        localStorage.removeItem('statusline_api_key');
+      }
+      updateApiKeyBtnText();
+      // 使用最新输入的密钥重试请求
+      options.headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+      res = await fetch(url, options);
+    }
+  }
+  return res;
+}
+
 function formatDurationCompact(seconds) {
   if (!seconds || seconds <= 0) return '0m';
   const days = Math.floor(seconds / 86400);
@@ -1153,14 +1212,14 @@ window.adjustAccountOrder = async function(key, delta) {
       sort_order: a.sort_order
     }));
 
-    const res = await fetch(getApiUrl('api/v1/config/aliases'), {
+    const res = await requestWithAuth(getApiUrl('api/v1/config/aliases'), {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert('调整排序失败: ' + (err.error || res.statusText));
+      const msg = res.status === 401 ? '未授权或 API Key 错误 (401 Unauthorized)' : (err.error || res.statusText);
+      alert('调整排序失败: ' + msg);
       return;
     }
     await loadAliases();
@@ -1195,14 +1254,14 @@ window.confirmSaveEditAlias = async function(key) {
   }
 
   try {
-    const res = await fetch(getApiUrl('api/v1/config/aliases'), {
+    const res = await requestWithAuth(getApiUrl('api/v1/config/aliases'), {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify([{ category: currentAliasTab, key, name, short_name: shortName, sort_order: sortOrder }])
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert('保存失败: ' + (err.error || res.statusText));
+      const msg = res.status === 401 ? '未授权或 API Key 错误 (401 Unauthorized)' : (err.error || res.statusText);
+      alert('保存失败: ' + msg);
       return;
     }
     editingAliasKey = null;
@@ -1236,14 +1295,14 @@ window.confirmSaveNewAlias = async function() {
   }
 
   try {
-    const res = await fetch(getApiUrl('api/v1/config/aliases'), {
+    const res = await requestWithAuth(getApiUrl('api/v1/config/aliases'), {
       method: 'POST',
-      headers: getAuthHeaders(),
       body: JSON.stringify([{ category: currentAliasTab, key, name, short_name: shortName, sort_order: sortOrder }])
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert('保存失败: ' + (err.error || res.statusText));
+      const msg = res.status === 401 ? '未授权或 API Key 错误 (401 Unauthorized)' : (err.error || res.statusText);
+      alert('保存失败: ' + msg);
       return;
     }
     addingNewAlias = false;
@@ -1259,13 +1318,13 @@ window.confirmSaveNewAlias = async function() {
 window.confirmDeleteAlias = async function(key) {
   if (!confirm(`确定要删除规则 [${key}] 吗？`)) return;
   try {
-    const res = await fetch(getApiUrl(`api/v1/config/aliases?category=${currentAliasTab}&key=${encodeURIComponent(key)}`), {
-      method: 'DELETE',
-      headers: getAuthHeaders()
+    const res = await requestWithAuth(getApiUrl(`api/v1/config/aliases?category=${currentAliasTab}&key=${encodeURIComponent(key)}`), {
+      method: 'DELETE'
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert('删除失败: ' + (err.error || res.statusText));
+      const msg = res.status === 401 ? '未授权或 API Key 错误 (401 Unauthorized)' : (err.error || res.statusText);
+      alert('删除失败: ' + msg);
       return;
     }
     await loadAliases();
@@ -1427,6 +1486,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       filterSessions();
     });
   }
+
+  // 检查 URL 是否带 api_key 参数，若有则自动持久化到 localStorage
+  const urlApiKey = new URLSearchParams(window.location.search).get('api_key');
+  if (urlApiKey) {
+    localStorage.setItem('statusline_api_key', urlApiKey);
+  }
+  updateApiKeyBtnText();
 
   // 初始化拉取
   await loadAliases();

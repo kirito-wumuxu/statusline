@@ -23,6 +23,7 @@
           <button id="btn-toggle-aliases" onclick="toggleAliasModal(true)" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="管理配额、模型与账号的别名映射">🏷️ 别名映射</button>
           <button onclick="switchMainTab('tab-debug')" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">🔍 调试原始上报 (5)</button>
           <button id="btn-manual-refresh" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">↻ 立即刷新</button>
+          <button id="btn-set-api-key" onclick="promptApiKey()" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="设置或查看服务端 API Key 认证密钥">🔑 密钥</button>
           <span class="px-2.5 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 mono">
             <span id="connection-status">已连接</span> · <span id="last-updated">--:--:--</span>
           </span>
@@ -231,6 +232,7 @@
         </div>
         <div class="flex items-center gap-2">
           <button id="btn-add-alias" class="btn-action btn-primary">+ 新增映射</button>
+          <button id="btn-set-api-key-modal" onclick="promptApiKey()" class="btn-action text-amber-300 border-amber-800/80 hover:bg-amber-950/40" title="设置或查看服务端 API Key 认证密钥">🔑 密钥</button>
           <button id="btn-close-alias" onclick="toggleAliasModal(false)" class="btn-action">关闭</button>
         </div>
       </div>
