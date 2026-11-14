@@ -117,9 +117,10 @@ statusline/
 │   │   └── updater_test.go         # 单元测试与 Mock 下载集成测试
 │   └── server/
 │       ├── handlers_version.go     # 服务端 GET /api/v1/version 接口 (新增)
-│       └── handlers_upgrade.go     # 服务端 GET /api/v1/upgrade/download 接口 (新增)
+│       ├── handlers_upgrade.go     # 服务端 GET /api/v1/upgrade/download 接口 (新增)
+│       └── handlers_release_mgr.go # 服务端 POST upload / sync-github 管理接口 (新增)
 └── scripts/
-    └── build-release.sh            # 完善 -ldflags="-X main.Version=${VERSION}"
+    └── build-release.sh            # 完善 -ldflags 注入与 --upload 自动推送支持
 ```
 
 ---
@@ -154,16 +155,41 @@ type Source interface {
    - 若服务端响应成功且包含当前平台资产信息，选用 `ServerSource`；
    - 若连接失败、超时或服务端返回不支持，自动回退选用 `GitHubSource`。
 
-### 4.2 服务端发布分发支持 (`statusline-server`)
+### 4.2 服务端发布分发与包管理体系 (`statusline-server`)
 
-服务端支持轻量级升级包分发与代理：
-1. **路由定义**：
-   - `GET /api/v1/version`：返回服务端自身运行版本及当前服务端已有的 Release 信息；
-   - `GET /api/v1/upgrade/download?platform={os}_{arch}`：下载平台专属压缩包。
-2. **托管机制**：
-   - 服务端启动时自动检查其运行目录下的 `dist/` 文件夹或同目录下是否存在 `statusline_*_{os}_{arch}.(tar.gz|zip)`；
-   - 若存在，自动解析出元数据并开放本地极速直连下载；
-   - 若不存在本地分发包，接口明确返回 `{"status":"ok", "upgrade_supported": false}`，触发客户端无损回退至 GitHub。
+服务端不仅支持为客户端提供极速分发，还提供多通道的发布包上传与同步机制：
+
+#### 1. 路由定义与权限保护
+- `GET /api/v1/version`：公开接口，返回服务端版本及已托管的 Release 清单与平台资产元数据；
+- `GET /api/v1/upgrade/download?platform={os}_{arch}`：公开接口，流式提供对应平台安装包下载；
+- `POST /api/v1/upgrade/upload`：**受 API Key 保护**，接收 `multipart/form-data` 上传的单个或批量发布包资产文件；
+- `POST /api/v1/upgrade/sync-github`：**受 API Key 保护**，触发服务端后台自动连接 GitHub Releases API，将最新的发布资产包下载并缓存至服务器本地。
+
+#### 2. 服务端本地存储与自动扫描
+- 在 `server.yaml` 中增加配置项：
+  ```yaml
+  storage:
+    releases_dir: "~/.local/share/statusline/releases"  # 升级包持久化存储目录
+  ```
+- 服务端启动与文件变动时，自动扫描该目录下所有满足命名格式的文件：
+  - `statusline_{version}_{os}_{arch}.(tar.gz|zip)`
+  - `checksums.txt`（包含各包的 SHA256 校验和）
+- 自动提取版本号（如 `v0.1.6`）与平台，按语义化版本（SemVer）降序维护可用版本索引。
+
+#### 3. 三大上传与同步途径
+- **途径 A（Web 仪表盘可视化上传 & 同步）**：
+  - 在 Web 管理界面（别名映射旁或独立弹窗）提供「📦 版本管理」面板：
+    - 支持直接通过浏览器拖拽上传 `statusline_*.tar.gz`、`.zip` 与 `checksums.txt`；
+    - 提供 **「↻ 一键从 GitHub 同步最新 Release」** 按钮，由服务端自动拉取并存入本地缓存，国内/局域网各节点客户端即可直接高速下载；
+    - 界面清晰展示当前服务端已托管的版本与平台包列表，支持删除旧版本。
+- **途径 B（本地目录直接投放）**：
+  - 运维人员可通过 `scp` / `rsync` 或 Docker Volume 直接将构建好的文件放入 `releases/` 目录，无需调用任何接口。
+- **途径 C（构建脚本一键推送）**：
+  - 扩展 `./scripts/build-release.sh` 脚本：
+    ```bash
+    ./scripts/build-release.sh v0.1.6 --upload http://127.0.0.1:8628/api/v1/upgrade/upload --api-key <secret>
+    ```
+    本地多平台交叉编译完成后，自动循环调用上传接口推送到远程服务器。
 
 ### 4.3 纯 Go 解压与校验流 (`extract.go`)
 
