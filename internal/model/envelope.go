@@ -397,18 +397,33 @@ func SplitQuotaKeySuffix(key string) (prefix string, window string) {
 
 // DisplayAliasItem represents a single alias mapping rule.
 type DisplayAliasItem struct {
-	Category    string `json:"category,omitempty"` // "quota", "model", "account"
-	Key         string `json:"key"`                // prefix or pattern, e.g. "gemini", "gemini-argon", "3p"
+	Category    string `json:"category,omitempty"` // "quota", "model", "account", "priority"
+	Key         string `json:"key"`                // prefix, pattern or module key (e.g. "model", "context")
 	DisplayName string `json:"name"`               // display name for full mode
 	ShortName   string `json:"short_name"`         // short name for compact mode
-	SortOrder   int    `json:"sort_order,omitempty"`// display order (1, 2, 3...)
+	SortOrder   int    `json:"sort_order,omitempty"`// display/priority order (1, 2, 3...)
 }
 
 // DisplayAliasesConfig groups all alias mapping rules.
 type DisplayAliasesConfig struct {
-	Quotas   []DisplayAliasItem `json:"quotas"`
-	Models   []DisplayAliasItem `json:"models"`
-	Accounts []DisplayAliasItem `json:"accounts"`
+	Quotas     []DisplayAliasItem `json:"quotas"`
+	Models     []DisplayAliasItem `json:"models"`
+	Accounts   []DisplayAliasItem `json:"accounts"`
+	Priorities []DisplayAliasItem `json:"priorities"`
+}
+
+// DefaultPriorityAliases returns the canonical priority order for statusline segments.
+// SortOrder: 1 = highest priority (most protected, dropped last); 7 = lowest priority (dropped first).
+func DefaultPriorityAliases() []DisplayAliasItem {
+	return []DisplayAliasItem{
+		{Category: "priority", Key: "model", DisplayName: "模型标识与推理深度", ShortName: "P1", SortOrder: 1},
+		{Category: "priority", Key: "context", DisplayName: "上下文进度条与百分比", ShortName: "P2", SortOrder: 2},
+		{Category: "priority", Key: "quota", DisplayName: "供应商配额余量与倒计时", ShortName: "P3", SortOrder: 3},
+		{Category: "priority", Key: "vcs", DisplayName: "Git 仓库分支与脏标记", ShortName: "P4", SortOrder: 4},
+		{Category: "priority", Key: "tokens", DisplayName: "会话 Token 吞吐计数器", ShortName: "P5", SortOrder: 5},
+		{Category: "priority", Key: "account", DisplayName: "登录账号标识与邮箱", ShortName: "P6", SortOrder: 6},
+		{Category: "priority", Key: "dir", DisplayName: "工作区目录", ShortName: "P7", SortOrder: 7},
+	}
 }
 
 func FormatDurationCompact(seconds int64) string {

@@ -70,26 +70,35 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 
 func initDefaultAliases(db *sql.DB) error {
 	defaultRecords := []struct {
-		category string
-		key      string
-		name     string
-		short    string
+		category  string
+		key       string
+		name      string
+		short     string
+		sortOrder int
 	}{
 		// Quotas (去时间后缀的前缀)
-		{"quota", "gemini", "Gemini", "G"},
-		{"quota", "gemini-argon", "Argon", "Ar"},
-		{"quota", "3p", "Claude", "C"},
-		{"quota", "claude", "Claude", "C"},
+		{"quota", "gemini", "Gemini", "G", 0},
+		{"quota", "gemini-argon", "Argon", "Ar", 0},
+		{"quota", "3p", "Claude", "C", 0},
+		{"quota", "claude", "Claude", "C", 0},
 		// Models
-		{"model", "gemini-3.8-flash", "Gemini 3.8 Flash", "Flash"},
-		{"model", "gemini-3.8-pro", "Gemini 3.8 Pro", "Pro"},
-		{"model", "claude-3-7-sonnet", "Claude 3.7 Sonnet", "Sonnet"},
-		{"model", "claude-opus", "Claude Opus", "Opus"},
+		{"model", "gemini-3.8-flash", "Gemini 3.8 Flash", "Flash", 0},
+		{"model", "gemini-3.8-pro", "Gemini 3.8 Pro", "Pro", 0},
+		{"model", "claude-3-7-sonnet", "Claude 3.7 Sonnet", "Sonnet", 0},
+		{"model", "claude-opus", "Claude Opus", "Opus", 0},
+		// Priorities
+		{"priority", "model", "模型标识与推理深度", "P1", 1},
+		{"priority", "context", "上下文进度条与百分比", "P2", 2},
+		{"priority", "quota", "供应商配额余量与倒计时", "P3", 3},
+		{"priority", "vcs", "Git 仓库分支与脏标记", "P4", 4},
+		{"priority", "tokens", "会话 Token 吞吐计数器", "P5", 5},
+		{"priority", "account", "登录账号标识与邮箱", "P6", 6},
+		{"priority", "dir", "工作区目录", "P7", 7},
 	}
 
 	stmt, err := db.Prepare(`
-		INSERT OR IGNORE INTO display_aliases (category, alias_key, display_name, short_name, updated_at)
-		VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		INSERT OR IGNORE INTO display_aliases (category, alias_key, display_name, short_name, sort_order, updated_at)
+		VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 	`)
 	if err != nil {
 		return err
@@ -97,7 +106,7 @@ func initDefaultAliases(db *sql.DB) error {
 	defer stmt.Close()
 
 	for _, r := range defaultRecords {
-		if _, err := stmt.Exec(r.category, r.key, r.name, r.short); err != nil {
+		if _, err := stmt.Exec(r.category, r.key, r.name, r.short, r.sortOrder); err != nil {
 			return err
 		}
 	}

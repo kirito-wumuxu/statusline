@@ -364,3 +364,53 @@ func TestMultiDayTokenConsumptionDelta(t *testing.T) {
 		t.Errorf("expected sum across days to be 4100, got %d", sumAcrossDays)
 	}
 }
+
+func TestPriorityAliasesStorage(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "priority_test.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	defer store.Close()
+
+	// 1. Verify that InitDB auto-seeded the 7 default priorities
+	initialCfg, err := store.GetDisplayAliases()
+	if err != nil {
+		t.Fatalf("GetDisplayAliases failed: %v", err)
+	}
+	if len(initialCfg.Priorities) != 7 {
+		t.Fatalf("expected 7 default priorities auto-seeded, got %d", len(initialCfg.Priorities))
+	}
+	if initialCfg.Priorities[0].Key != "model" || initialCfg.Priorities[0].SortOrder != 1 {
+		t.Errorf("expected default #1 priority to be model, got %+v", initialCfg.Priorities[0])
+	}
+	if initialCfg.Priorities[6].Key != "dir" || initialCfg.Priorities[6].SortOrder != 7 {
+		t.Errorf("expected default #7 priority to be dir, got %+v", initialCfg.Priorities[6])
+	}
+
+	// 2. Custom update: invert priority (dir = 1, model = 7)
+	customPriorities := []model.DisplayAliasItem{
+		{Category: "priority", Key: "dir", DisplayName: "工作区目录", SortOrder: 1},
+		{Category: "priority", Key: "model", DisplayName: "模型标识", SortOrder: 7},
+	}
+
+	if err := store.SaveDisplayAliases(customPriorities); err != nil {
+		t.Fatalf("failed to save custom priority aliases: %v", err)
+	}
+
+	cfg, err := store.GetDisplayAliases()
+	if err != nil {
+		t.Fatalf("failed to get display aliases: %v", err)
+	}
+
+	if len(cfg.Priorities) != 7 {
+		t.Fatalf("expected 7 priorities, got %d", len(cfg.Priorities))
+	}
+	if cfg.Priorities[0].Key != "dir" || cfg.Priorities[0].SortOrder != 1 {
+		t.Errorf("expected first priority to now be dir with sort_order 1, got %+v", cfg.Priorities[0])
+	}
+	if cfg.Priorities[6].Key != "model" || cfg.Priorities[6].SortOrder != 7 {
+		t.Errorf("expected last priority to now be model with sort_order 7, got %+v", cfg.Priorities[6])
+	}
+}
+

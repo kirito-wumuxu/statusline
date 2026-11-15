@@ -768,9 +768,10 @@ func (s *Store) GetDisplayAliases() (*model.DisplayAliasesConfig, error) {
 	defer rows.Close()
 
 	cfg := &model.DisplayAliasesConfig{
-		Quotas:   []model.DisplayAliasItem{},
-		Models:   []model.DisplayAliasItem{},
-		Accounts: []model.DisplayAliasItem{},
+		Quotas:     []model.DisplayAliasItem{},
+		Models:     []model.DisplayAliasItem{},
+		Accounts:   []model.DisplayAliasItem{},
+		Priorities: []model.DisplayAliasItem{},
 	}
 
 	for rows.Next() {
@@ -793,6 +794,8 @@ func (s *Store) GetDisplayAliases() (*model.DisplayAliasesConfig, error) {
 			cfg.Models = append(cfg.Models, item)
 		case "account":
 			cfg.Accounts = append(cfg.Accounts, item)
+		case "priority":
+			cfg.Priorities = append(cfg.Priorities, item)
 		}
 	}
 
