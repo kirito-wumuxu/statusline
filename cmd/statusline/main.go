@@ -89,7 +89,11 @@ func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 	if cfg != nil && len(cfg.Display.Segments) > 0 {
 		segments = cfg.Display.Segments
 	}
-	line := render.AssembleLine(data, homeDir, segments)
+	var priorities []string
+	if cfg != nil && len(cfg.Display.Priorities) > 0 {
+		priorities = cfg.Display.Priorities
+	}
+	line := render.AssembleLine(data, homeDir, segments, priorities)
 	_, _ = io.WriteString(w, line)
 
 	// CRIT-1: Terminal output is already written. Synchronously report with strict timeout

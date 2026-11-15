@@ -7,43 +7,169 @@ import (
 	"statusline/internal/model"
 )
 
+type SegmentState int
+
+const (
+	StateFull    SegmentState = 0
+	StateShort   SegmentState = 1
+	StateCompact SegmentState = 2
+	StateHidden  SegmentState = 3
+)
+
+func canonicalSegmentName(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "dir", "cwd":
+		return "dir"
+	case "vcs", "git":
+		return "vcs"
+	case "account", "user", "email":
+		return "account"
+	case "model":
+		return "model"
+	case "context", "ctx":
+		return "context"
+	case "tokens":
+		return "tokens"
+	case "quota":
+		return "quota"
+	default:
+		return strings.ToLower(strings.TrimSpace(s))
+	}
+}
+
 // AssembleLine builds the complete ANSI-formatted statusline, applying
-// modular segment rendering and adaptive compaction if data.TerminalWidth is specified.
-func AssembleLine(data *model.StatusLineData, homeDir string, customSegments ...[]string) string {
+// modular segment rendering and priority-based progressive degradation.
+func AssembleLine(data *model.StatusLineData, homeDir string, customOptions ...[]string) string {
 	segments := []string{"dir", "vcs", "account", "model", "context", "tokens", "quota"}
-	if len(customSegments) > 0 && len(customSegments[0]) > 0 {
-		segments = customSegments[0]
+	if len(customOptions) > 0 && len(customOptions[0]) > 0 {
+		segments = customOptions[0]
 	}
 
-	fullLine := buildLine(data, homeDir, segments, 0)
+	var priorities []string
+	if len(customOptions) > 1 && len(customOptions[1]) > 0 {
+		priorities = customOptions[1]
+	} else {
+		priorities = []string{"model", "context", "quota", "vcs", "tokens", "account", "dir"}
+	}
 
+	return AssembleLineWithPriorities(data, homeDir, segments, priorities)
+}
+
+// AssembleLineWithPriorities implements the 3-phase greedy progressive degradation algorithm.
+func AssembleLineWithPriorities(data *model.StatusLineData, homeDir string, segments []string, priorities []string) string {
 	termWidth := 0
 	if data != nil && data.TerminalWidth > 0 {
 		termWidth = data.TerminalWidth
 	}
 
-	// If no width constraint or line fits, return standard full line
+	// Initialize all configured segments in StateFull
+	states := make(map[string]SegmentState)
+	segSet := make(map[string]bool)
+	for _, s := range segments {
+		clean := canonicalSegmentName(s)
+		if clean != "|" && clean != "sep" {
+			states[clean] = StateFull
+			segSet[clean] = true
+		}
+	}
+
+	fullLine := buildLineWithStates(data, homeDir, segments, states)
 	if termWidth <= 0 || len(StripANSI(fullLine)) <= termWidth {
 		return fullLine
 	}
 
-	// Level 1: Compact model, account, and quota labels
-	l1 := buildLine(data, homeDir, segments, 1)
-	if len(StripANSI(l1)) <= termWidth {
-		return l1
+	// Build degrade order: reverse of priorities (lowest priority degrades first)
+	// Any segment present in segments but missing in priorities is placed at the front (degraded earliest)
+	var degradeOrder []string
+	seen := make(map[string]bool)
+
+	var revPriorities []string
+	for i := len(priorities) - 1; i >= 0; i-- {
+		revPriorities = append(revPriorities, canonicalSegmentName(priorities[i]))
 	}
 
-	// Level 2: Compact context bar (4 slashes) and single-bucket quota
-	l2 := buildLine(data, homeDir, segments, 2)
-	if len(StripANSI(l2)) <= termWidth {
-		return l2
+	// Segments not in priorities come first
+	for _, s := range segments {
+		clean := canonicalSegmentName(s)
+		if clean == "|" || clean == "sep" {
+			continue
+		}
+		inP := false
+		for _, p := range priorities {
+			if canonicalSegmentName(p) == clean {
+				inP = true
+				break
+			}
+		}
+		if !inP && !seen[clean] {
+			seen[clean] = true
+			degradeOrder = append(degradeOrder, clean)
+		}
 	}
 
-	// Level 3: Ultra narrow (e.g. < 70 chars) - drop dir, vcs, account and keep core stats
-	return buildLine(data, homeDir, segments, 3)
+	for _, p := range revPriorities {
+		if segSet[p] && !seen[p] {
+			seen[p] = true
+			degradeOrder = append(degradeOrder, p)
+		}
+	}
+
+	tryFit := func() (string, bool) {
+		line := buildLineWithStates(data, homeDir, segments, states)
+		if len(StripANSI(line)) <= termWidth {
+			return line, true
+		}
+		return "", false
+	}
+
+	// Phase 1: Progressive ShortName replacement
+	for _, mod := range degradeOrder {
+		switch mod {
+		case "dir", "account", "model", "quota":
+			if states[mod] == StateFull {
+				states[mod] = StateShort
+				if line, ok := tryFit(); ok {
+					return line
+				}
+			}
+		}
+	}
+
+	// Phase 2: Progressive structural compacting
+	for _, mod := range degradeOrder {
+		switch mod {
+		case "context", "quota":
+			if states[mod] < StateCompact {
+				states[mod] = StateCompact
+				if line, ok := tryFit(); ok {
+					return line
+				}
+			}
+		}
+	}
+
+	// Phase 3: Progressive module pruning / hiding (protect last remaining visible module)
+	for _, mod := range degradeOrder {
+		visibleCount := 0
+		for m, st := range states {
+			if segSet[m] && st != StateHidden {
+				visibleCount++
+			}
+		}
+		if visibleCount <= 1 {
+			break
+		}
+
+		states[mod] = StateHidden
+		if line, ok := tryFit(); ok {
+			return line
+		}
+	}
+
+	return buildLineWithStates(data, homeDir, segments, states)
 }
 
-func buildLine(data *model.StatusLineData, homeDir string, segments []string, level int) string {
+func buildLineWithStates(data *model.StatusLineData, homeDir string, segments []string, states map[string]SegmentState) string {
 	sep := fmt.Sprintf("%s|%s", AnsiDarkGray, AnsiReset)
 
 	hasExplicitSep := false
@@ -67,18 +193,19 @@ func buildLine(data *model.StatusLineData, homeDir string, segments []string, le
 			continue
 		}
 
-		// Level 3 (ultra narrow): drop non-essential contextual segments
-		if level == 3 && (clean == "dir" || clean == "cwd" || clean == "vcs" || clean == "git" || clean == "account" || clean == "user" || clean == "email") {
+		canonical := canonicalSegmentName(clean)
+		state := states[canonical]
+		if state == StateHidden {
 			continue
 		}
 
-		txt := renderSegment(clean, data, homeDir, level)
+		txt := renderSegmentWithState(canonical, data, homeDir, state)
 		if txt == "" {
 			continue
 		}
 
 		// If no explicit separator was configured, auto-insert pipe before tokens and quota
-		if !hasExplicitSep && (clean == "tokens" || clean == "quota") {
+		if !hasExplicitSep && (canonical == "tokens" || canonical == "quota") {
 			if len(parts) > 0 && parts[len(parts)-1] != sep {
 				needSep = true
 			}
@@ -95,36 +222,93 @@ func buildLine(data *model.StatusLineData, homeDir string, segments []string, le
 	return strings.Join(parts, " ")
 }
 
+func buildLine(data *model.StatusLineData, homeDir string, segments []string, level int) string {
+	states := make(map[string]SegmentState)
+	for _, s := range segments {
+		clean := canonicalSegmentName(s)
+		if clean == "|" || clean == "sep" {
+			continue
+		}
+		switch level {
+		case 0:
+			states[clean] = StateFull
+		case 1:
+			switch clean {
+			case "dir", "account", "model", "quota":
+				states[clean] = StateShort
+			default:
+				states[clean] = StateFull
+			}
+		case 2:
+			switch clean {
+			case "dir", "account", "model":
+				states[clean] = StateShort
+			case "context", "quota":
+				states[clean] = StateCompact
+			default:
+				states[clean] = StateFull
+			}
+		case 3:
+			switch clean {
+			case "dir", "vcs", "account":
+				states[clean] = StateHidden
+			case "model":
+				states[clean] = StateShort
+			case "context", "quota":
+				states[clean] = StateCompact
+			default:
+				states[clean] = StateFull
+			}
+		}
+	}
+	return buildLineWithStates(data, homeDir, segments, states)
+}
+
 func renderSegment(name string, data *model.StatusLineData, homeDir string, level int) string {
+	state := StateFull
+	if level == 1 {
+		state = StateShort
+	} else if level == 2 {
+		state = StateCompact
+	} else if level == 3 {
+		state = StateHidden
+	}
+	return renderSegmentWithState(canonicalSegmentName(name), data, homeDir, state)
+}
+
+func renderSegmentWithState(name string, data *model.StatusLineData, homeDir string, state SegmentState) string {
+	if state == StateHidden {
+		return ""
+	}
 	switch name {
-	case "dir", "cwd":
-		if level == 0 {
+	case "dir":
+		if state == StateFull {
 			return FormatDir(data, homeDir)
 		}
 		return FormatDirCompact(data, homeDir)
-	case "vcs", "git":
+	case "vcs":
 		return FormatVCS(data)
-	case "account", "user", "email":
-		if level == 0 {
+	case "account":
+		if state == StateFull {
 			return FormatAccount(data)
 		}
 		return formatAccountCompact(data)
 	case "model":
-		if level <= 1 {
+		if state == StateFull {
 			return FormatModel(data)
 		}
 		return formatModelCompact(data)
-	case "context", "ctx":
-		if level <= 1 {
+	case "context":
+		if state <= StateShort {
 			return FormatContext(data)
 		}
 		return formatContextCompact(data)
 	case "tokens":
 		return FormatTokens(data)
 	case "quota":
-		if level == 0 {
+		if state == StateFull {
 			return FormatQuota(data)
-		} else if level <= 2 {
+		} else if state == StateShort {
 			return formatQuotaCompact(data, true, false)
 		}
 		return formatQuotaCompact(data, true, true)

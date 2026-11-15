@@ -413,3 +413,161 @@ func TestNarrowQuotaBothBucketsWithShortLabel(t *testing.T) {
 		t.Errorf("expected 'C: 83%%(4h4m) 90%%(4d1h)' in line, got %q", plain)
 	}
 }
+
+func TestPriorityDegradationPipeline(t *testing.T) {
+	createSampleData := func(w int) *model.StatusLineData {
+		return &model.StatusLineData{
+			Product: "antigravity",
+			CWD:     "/home/user/workspace/repository/statusline",
+			VCS: model.VCSInfo{
+				Branch: "main",
+			},
+			Email: "kirito_wu@163.com",
+			Model: model.ModelInfo{
+				ID:          "gemini-3.8-flash",
+				DisplayName: "Gemini 3.8 Flash",
+				Effort:      "High",
+			},
+			ContextWindow: model.ContextWindowInfo{
+				TotalInputTokens:  1500,
+				TotalOutputTokens: 230,
+				ContextWindowSize: 1048576,
+				UsedPercentage:    22,
+			},
+			Quota: map[string]model.QuotaBucket{
+				"gemini-5h": {
+					RemainingFraction: 0.83,
+					ResetInSeconds:    14640,
+				},
+				"gemini-weekly": {
+					RemainingFraction: 0.90,
+					ResetInSeconds:    349200,
+				},
+			},
+			TerminalWidth: w,
+		}
+	}
+
+	segments := []string{"dir", "vcs", "account", "model", "context", "tokens", "quota"}
+	priorities := []string{"model", "context", "quota", "vcs", "tokens", "account", "dir"}
+
+	// 1. Wide terminal (200 chars): Full uncompressed
+	d200 := createSampleData(200)
+	l200 := StripANSI(AssembleLine(d200, "/home/user", segments, priorities))
+	if !strings.Contains(l200, "[~/workspace/repository/statusline]") {
+		t.Errorf("expected full dir in wide terminal, got: %s", l200)
+	}
+	if !strings.Contains(l200, "<kirito_wu@163.com>") {
+		t.Errorf("expected full account in wide terminal, got: %s", l200)
+	}
+	if !strings.Contains(l200, "[Gemini 3.8 Flash (High)]") {
+		t.Errorf("expected full model in wide terminal, got: %s", l200)
+	}
+	if !strings.Contains(l200, `\\\\\\\\ 22% [1M]`) {
+		t.Errorf("expected 8 slashes context in wide terminal, got: %s", l200)
+	}
+
+	// 2. Medium terminal (115 chars): Phase 1 triggers for lowest priorities
+	// dir and account become ShortName, but model (rank 1) stays full!
+	d115 := createSampleData(115)
+	l115 := StripANSI(AssembleLine(d115, "/home/user", segments, priorities))
+	if strings.Contains(l115, "[~/workspace/repository/statusline]") {
+		t.Errorf("expected dir to be shortened, got: %s", l115)
+	}
+	if !strings.Contains(l115, "[statusline]") {
+		t.Errorf("expected '[statusline]' in medium terminal, got: %s", l115)
+	}
+	if len(l115) > 115 {
+		t.Errorf("expected length <= 115, got %d: %s", len(l115), l115)
+	}
+
+	// 3. Narrow terminal (70 chars): Phase 2 triggers
+	// context compresses to 4 slashes, quota single bucket
+	d70 := createSampleData(70)
+	l70 := StripANSI(AssembleLine(d70, "/home/user", segments, priorities))
+	if len(l70) > 70 {
+		t.Errorf("expected length <= 70, got %d: %s", len(l70), l70)
+	}
+	if strings.Contains(l70, `\\\\\\\\`) {
+		t.Errorf("expected context bar to be 4 slashes in narrow terminal, got: %s", l70)
+	}
+
+	// 4. Ultra narrow terminal (45 chars): Phase 3 triggers (low priority dropped)
+	d45 := createSampleData(45)
+	l45 := StripANSI(AssembleLine(d45, "/home/user", segments, priorities))
+	if len(l45) > 45 {
+		t.Errorf("expected length <= 45, got %d: %s", len(l45), l45)
+	}
+	// model (highest priority) must be protected and preserved!
+	if !strings.Contains(l45, "Flash") {
+		t.Errorf("expected highest priority model to be preserved in ultra-narrow terminal, got: %s", l45)
+	}
+}
+
+func TestPriorityInversionProtection(t *testing.T) {
+	data := &model.StatusLineData{
+		Product: "antigravity",
+		CWD:     "/home/user/workspace/repository/statusline",
+		VCS: model.VCSInfo{
+			Branch: "main",
+		},
+		Email: "kirito_wu@163.com",
+		Model: model.ModelInfo{
+			ID:          "gemini-3.8-flash",
+			DisplayName: "Gemini 3.8 Flash",
+		},
+		TerminalWidth: 35, // Very narrow
+	}
+
+	segments := []string{"dir", "vcs", "model"}
+
+	// Inverted priority: dir is #1 (most protected), model is lowest (least protected)
+	invertedPriorities := []string{"dir", "vcs", "model"}
+
+	line := StripANSI(AssembleLine(data, "/home/user", segments, invertedPriorities))
+	if len(line) > 35 {
+		t.Errorf("expected length <= 35, got %d: %s", len(line), line)
+	}
+	// dir must be preserved!
+	if !strings.Contains(line, "statusline") {
+		t.Errorf("expected dir to be protected and present, got: %s", line)
+	}
+}
+
+func BenchmarkAssembleLinePriorityDegradation(b *testing.B) {
+	data := &model.StatusLineData{
+		Product: "antigravity",
+		CWD:     "/home/user/workspace/repository/statusline",
+		VCS: model.VCSInfo{
+			Branch: "main",
+		},
+		Email: "kirito_wu@163.com",
+		Model: model.ModelInfo{
+			ID:          "gemini-3.8-flash",
+			DisplayName: "Gemini 3.8 Flash",
+			Effort:      "High",
+		},
+		ContextWindow: model.ContextWindowInfo{
+			TotalInputTokens:  1500,
+			TotalOutputTokens: 230,
+			ContextWindowSize: 1048576,
+			UsedPercentage:    22,
+		},
+		Quota: map[string]model.QuotaBucket{
+			"gemini-5h": {
+				RemainingFraction: 0.83,
+				ResetInSeconds:    14640,
+			},
+		},
+		TerminalWidth: 65, // Forces multi-phase degradation
+	}
+	segments := []string{"dir", "vcs", "account", "model", "context", "tokens", "quota"}
+	priorities := []string{"model", "context", "quota", "vcs", "tokens", "account", "dir"}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = AssembleLine(data, "/home/user", segments, priorities)
+	}
+}
+
+
