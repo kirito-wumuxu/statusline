@@ -233,6 +233,7 @@
         </div>
         <div class="flex items-center gap-2">
           <button id="btn-add-alias" class="btn-action btn-primary">+ 新增映射</button>
+          <button id="btn-reset-priorities" onclick="resetDefaultPriorities()" class="btn-action text-sky-300 border-sky-800/80 hover:bg-sky-950/40 hidden" title="将模块优先级恢复为官方推荐顺序">↺ 恢复默认排序</button>
           <button id="btn-set-api-key-modal" onclick="promptApiKey()" class="btn-action text-amber-300 border-amber-800/80 hover:bg-amber-950/40" title="设置或查看服务端 API Key 认证密钥">🔑 密钥</button>
           <button id="btn-close-alias" onclick="toggleAliasModal(false)" class="btn-action">关闭</button>
         </div>
@@ -242,6 +243,7 @@
           <button class="alias-tab tab-btn active px-4 py-1.5 rounded-lg text-xs font-bold" data-tab="quota">配额实体 (Quotas)</button>
           <button class="alias-tab tab-btn px-4 py-1.5 rounded-lg text-xs font-bold" data-tab="model">模型实体 (Models)</button>
           <button class="alias-tab tab-btn px-4 py-1.5 rounded-lg text-xs font-bold" data-tab="account">账号实体 (Accounts)</button>
+          <button class="alias-tab tab-btn px-4 py-1.5 rounded-lg text-xs font-bold" data-tab="priority">⚡ 模块优先级 (Priorities)</button>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse text-xs" id="alias-table">

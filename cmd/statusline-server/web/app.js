@@ -253,6 +253,11 @@ async function loadAliases() {
         const orderB = b.sort_order > 0 ? b.sort_order : 999999;
         if (orderA !== orderB) return orderA - orderB;
         return (a.key || '').localeCompare(b.key || '');
+      }),
+      priorities: (data.priorities || []).sort((a, b) => {
+        const orderA = a.sort_order > 0 ? a.sort_order : 999999;
+        const orderB = b.sort_order > 0 ? b.sort_order : 999999;
+        return orderA - orderB;
       })
     };
   } catch (e) {
@@ -1074,6 +1079,16 @@ window.copyCurrentDebugJSON = function() {
 };
 
 // 6. 别名管理弹窗与 CRUD
+const MODULE_DESCRIPTIONS = {
+  'model': { name: '模型标识与推理深度', desc: 'Phase 1 缩为短名 [Flash-H]；Phase 3 极端保底', defaultOrder: 1 },
+  'context': { name: '上下文进度条与百分比', desc: 'Phase 2 进度条 8 斜杠压缩为 4 斜杠', defaultOrder: 2 },
+  'quota': { name: '供应商配额余量与倒计时', desc: 'Phase 1 缩为 G:/C:；Phase 2 双窗口缩为单窗口', defaultOrder: 3 },
+  'vcs': { name: 'Git 仓库分支与脏标记', desc: '代码分支 (main*)；Phase 3 空间不足时裁剪', defaultOrder: 4 },
+  'tokens': { name: '会话 Token 吞吐计数器', desc: '吞吐指标 ↑1.5k ↓230；Phase 3 空间不足时裁剪', defaultOrder: 5 },
+  'account': { name: '登录账号标识与邮箱', desc: 'Phase 1 缩为短名或邮箱前缀；Phase 3 裁剪', defaultOrder: 6 },
+  'dir': { name: '工作区目录', desc: 'Phase 1 缩为目录名 [statusline]；Phase 3 最先裁剪', defaultOrder: 7 }
+};
+
 window.toggleAliasModal = function(show) {
   isAliasesOpen = show;
   const modal = document.getElementById('alias-modal');
@@ -1087,13 +1102,102 @@ window.toggleAliasModal = function(show) {
 function renderAliasTable() {
   const tbody = document.getElementById('alias-tbody');
   const thKey = document.getElementById('alias-th-key');
+  const thName = document.querySelector('#alias-table th:nth-child(2)');
+  const thShort = document.querySelector('#alias-table th:nth-child(3)');
+  const thSort = document.getElementById('alias-th-sort');
+  const thAction = document.querySelector('#alias-table th:nth-child(5)');
+  const btnAdd = document.getElementById('btn-add-alias');
+  const btnReset = document.getElementById('btn-reset-priorities');
+  const tipEl = document.getElementById('alias-extra-tip');
   if (!tbody) return;
+
+  if (btnAdd) btnAdd.classList.toggle('hidden', currentAliasTab === 'priority');
+  if (btnReset) btnReset.classList.toggle('hidden', currentAliasTab !== 'priority');
+
+  if (currentAliasTab === 'priority') {
+    if (thKey) thKey.textContent = '模块标识 (Key)';
+    if (thName) thName.textContent = '模块说明 (宽屏)';
+    if (thShort) thShort.textContent = '空间降级行为';
+    if (thSort) thSort.textContent = '保护优先级';
+    if (thAction) thAction.textContent = '快速排序微调';
+
+    let priorities = activeAliases.priorities || [];
+    if (priorities.length === 0) {
+      priorities = Object.keys(MODULE_DESCRIPTIONS).map(k => ({
+        category: 'priority',
+        key: k,
+        name: MODULE_DESCRIPTIONS[k].name,
+        short_name: 'P' + MODULE_DESCRIPTIONS[k].defaultOrder,
+        sort_order: MODULE_DESCRIPTIONS[k].defaultOrder
+      })).sort((a, b) => a.sort_order - b.sort_order);
+      activeAliases.priorities = priorities;
+    }
+
+    let html = '';
+    for (let i = 0; i < priorities.length; i++) {
+      const p = priorities[i];
+      const descInfo = MODULE_DESCRIPTIONS[p.key] || { name: p.name || p.key, desc: '--' };
+      const order = i + 1;
+
+      let badgeClass = 'bg-rose-950/80 text-rose-300 border-rose-800';
+      let labelText = '最先降级';
+      if (order === 1) {
+        badgeClass = 'bg-emerald-950/80 text-emerald-300 border-emerald-800';
+        labelText = '最高保护';
+      } else if (order <= 3) {
+        badgeClass = 'bg-sky-950/80 text-sky-300 border-sky-800';
+        labelText = '核心指标';
+      } else if (order <= 5) {
+        badgeClass = 'bg-amber-950/80 text-amber-300 border-amber-800';
+        labelText = '次要指标';
+      }
+
+      const badgeHtml = `
+        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-xs font-bold ${badgeClass}">
+          <span class="mono">#${order}</span>
+          <span>${labelText}</span>
+        </span>
+      `;
+
+      const sortControl = `
+        <div class="inline-flex items-center gap-1 bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-800">
+          <button class="btn-action btn-xs text-sky-400 hover:text-white" ${i === 0 ? 'disabled' : ''} onclick="adjustPriorityOrder('${escapeHtml(p.key)}', -1)" title="上移优先级 (更受保护)">▲ 上移</button>
+          <button class="btn-action btn-xs text-sky-400 hover:text-white" ${i === priorities.length - 1 ? 'disabled' : ''} onclick="adjustPriorityOrder('${escapeHtml(p.key)}', 1)" title="下移优先级 (先被降级)">▼ 下移</button>
+        </div>
+      `;
+
+      html += `
+        <tr class="hover:bg-slate-800/40 transition">
+          <td class="py-2.5 px-3"><code>${escapeHtml(p.key)}</code></td>
+          <td class="py-2.5 px-3"><strong>${escapeHtml(p.name || descInfo.name)}</strong></td>
+          <td class="py-2.5 px-3"><span class="text-slate-400 text-xs">${escapeHtml(descInfo.desc)}</span></td>
+          <td class="py-2.5 px-3 text-center">${badgeHtml}</td>
+          <td class="py-2.5 px-3 text-right">${sortControl}</td>
+        </tr>
+      `;
+    }
+    tbody.innerHTML = html;
+
+    if (tipEl) {
+      tipEl.innerHTML = `
+        <div class="mt-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 flex items-center justify-between">
+          <div>💡 <b>排版规则</b>：排在前面的模块受到最高优先级保护（窄屏最晚裁剪）；终端执行 <code class="text-sky-300">statusline init</code> 即可从云端同步生效。</div>
+          <button class="btn-action btn-sm text-sky-400 border border-sky-800/60" onclick="resetDefaultPriorities()">↺ 恢复推荐排序</button>
+        </div>
+      `;
+    }
+    return;
+  }
 
   if (thKey) {
     if (currentAliasTab === 'quota') thKey.textContent = '匹配前缀 (如 gemini, 3p, gemini-argon)';
     else if (currentAliasTab === 'model') thKey.textContent = '模型匹配标识 (如 gemini-3.8-flash, sonnet)';
     else thKey.textContent = '账号邮箱 (如 dev@example.com)';
   }
+  if (thName) thName.textContent = '完整显示名 (宽屏)';
+  if (thShort) thShort.textContent = '紧凑缩写 (窄屏)';
+  if (thSort) thSort.textContent = '展示排序';
+  if (thAction) thAction.textContent = '操作';
 
   const listKey = currentAliasTab === 'quota' ? 'quotas' : currentAliasTab === 'model' ? 'models' : 'accounts';
   const items = activeAliases[listKey] || [];
@@ -1171,7 +1275,6 @@ function renderAliasTable() {
   tbody.innerHTML = html;
 
   // 账号未配置提示与一键快捷添加
-  const tipEl = document.getElementById('alias-extra-tip');
   if (tipEl) {
     if (currentAliasTab === 'account' && Array.isArray(lastRawQuotas) && lastRawQuotas.length > 0) {
       const mappedKeys = new Set((activeAliases.accounts || []).map(a => (a.key || '').toLowerCase()));
@@ -1239,6 +1342,81 @@ window.adjustAccountOrder = async function(key, delta) {
     await loadAliases();
     renderAliasTable();
     await refreshDashboard(true);
+  } catch (e) {
+    alert('请求异常: ' + e.message);
+  }
+};
+
+window.adjustPriorityOrder = async function(key, delta) {
+  const priorities = activeAliases.priorities || [];
+  const idx = priorities.findIndex(p => (p.key || '').toLowerCase() === (key || '').toLowerCase());
+  if (idx === -1) return;
+
+  const targetIdx = idx + delta;
+  if (targetIdx < 0 || targetIdx >= priorities.length) return;
+
+  // Swap
+  const temp = priorities[idx];
+  priorities[idx] = priorities[targetIdx];
+  priorities[targetIdx] = temp;
+
+  // Reassign 1-based sequential sort_order
+  priorities.forEach((p, i) => {
+    p.sort_order = i + 1;
+  });
+
+  try {
+    const payload = priorities.map(p => ({
+      category: 'priority',
+      key: p.key,
+      name: p.name || MODULE_DESCRIPTIONS[p.key]?.name || p.key,
+      short_name: 'P' + p.sort_order,
+      sort_order: p.sort_order
+    }));
+
+    const res = await requestWithAuth(getApiUrl('api/v1/config/aliases'), {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const msg = res.status === 401 ? '未授权或 API Key 错误 (401 Unauthorized)' : (err.error || res.statusText);
+      alert('调整优先级失败: ' + msg);
+      return;
+    }
+    await loadAliases();
+    renderAliasTable();
+  } catch (e) {
+    alert('请求异常: ' + e.message);
+  }
+};
+
+window.resetDefaultPriorities = async function() {
+  if (!confirm('确定将 7 大模块优先级恢复为官方推荐顺序吗？\n(model > context > quota > vcs > tokens > account > dir)')) {
+    return;
+  }
+  const defaultKeys = ['model', 'context', 'quota', 'vcs', 'tokens', 'account', 'dir'];
+  const payload = defaultKeys.map((k, i) => ({
+    category: 'priority',
+    key: k,
+    name: MODULE_DESCRIPTIONS[k]?.name || k,
+    short_name: 'P' + (i + 1),
+    sort_order: i + 1
+  }));
+
+  try {
+    const res = await requestWithAuth(getApiUrl('api/v1/config/aliases'), {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const msg = res.status === 401 ? '未授权或 API Key 错误 (401 Unauthorized)' : (err.error || res.statusText);
+      alert('恢复默认排序失败: ' + msg);
+      return;
+    }
+    await loadAliases();
+    renderAliasTable();
   } catch (e) {
     alert('请求异常: ' + e.message);
   }
