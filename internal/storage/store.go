@@ -477,38 +477,54 @@ func (s *Store) GetDailyModelTokens(days int) ([]DailyTokensSummary, error) {
 	}
 
 	query := `
-	WITH daily_session_bounds AS (
+	WITH event_deltas AS (
 		SELECT 
-			strftime('%Y-%m-%d', e.reported_at) AS day,
+			e.id,
 			e.session_id,
 			e.model_id,
 			COALESCE(e.model_display_name, e.model_id) AS display_name,
-			MAX(e.total_input_tokens) AS max_in,
-			MAX(e.total_output_tokens) AS max_out,
-			COALESCE((
-				SELECT MAX(e2.total_input_tokens) 
-				FROM telemetry_events e2 
-				WHERE e2.session_id = e.session_id 
-				  AND strftime('%Y-%m-%d', e2.reported_at) < strftime('%Y-%m-%d', e.reported_at)
-			), 0) AS base_in,
-			COALESCE((
-				SELECT MAX(e2.total_output_tokens) 
-				FROM telemetry_events e2 
-				WHERE e2.session_id = e.session_id 
-				  AND strftime('%Y-%m-%d', e2.reported_at) < strftime('%Y-%m-%d', e.reported_at)
-			), 0) AS base_out
+			strftime('%Y-%m-%d', e.reported_at) AS day,
+			e.reported_at,
+			COALESCE(e.current_output_tokens, 0) AS cur_out,
+			COALESCE(e.total_output_tokens, 0) AS tot_out,
+			LAG(COALESCE(e.total_output_tokens, 0)) OVER (PARTITION BY e.session_id ORDER BY e.reported_at ASC, e.id ASC) AS prev_out,
+			COALESCE(e.current_input_tokens, 0) AS cur_in,
+			COALESCE(e.total_input_tokens, 0) AS tot_in,
+			LAG(COALESCE(e.total_input_tokens, 0)) OVER (PARTITION BY e.session_id ORDER BY e.reported_at ASC, e.id ASC) AS prev_in
 		FROM telemetry_events e
-		WHERE e.reported_at >= datetime('now', '-' || ? || ' days')
-		GROUP BY day, e.model_id, e.session_id
 	)
 	SELECT 
 		day,
 		model_id,
-		display_name,
-		COALESCE(SUM(CASE WHEN max_in > base_in THEN max_in - base_in ELSE 0 END), 0) AS in_tokens,
-		COALESCE(SUM(CASE WHEN max_out > base_out THEN max_out - base_out ELSE 0 END), 0) AS out_tokens,
-		COALESCE(SUM((CASE WHEN max_in > base_in THEN max_in - base_in ELSE 0 END) + (CASE WHEN max_out > base_out THEN max_out - base_out ELSE 0 END)), 0) AS total_tokens
-	FROM daily_session_bounds
+		MAX(display_name) AS display_name,
+		COALESCE(SUM(CASE 
+			WHEN cur_in > 0 THEN cur_in
+			WHEN prev_in IS NULL THEN tot_in 
+			WHEN tot_in > prev_in THEN tot_in - prev_in 
+			ELSE 0 
+		END), 0) AS in_tokens,
+		COALESCE(SUM(CASE 
+			WHEN cur_out > 0 THEN cur_out
+			WHEN prev_out IS NULL THEN tot_out 
+			WHEN tot_out > prev_out THEN tot_out - prev_out 
+			ELSE 0 
+		END), 0) AS out_tokens,
+		COALESCE(SUM(
+			(CASE 
+				WHEN cur_in > 0 THEN cur_in
+				WHEN prev_in IS NULL THEN tot_in 
+				WHEN tot_in > prev_in THEN tot_in - prev_in 
+				ELSE 0 
+			END) + 
+			(CASE 
+				WHEN cur_out > 0 THEN cur_out
+				WHEN prev_out IS NULL THEN tot_out 
+				WHEN tot_out > prev_out THEN tot_out - prev_out 
+				ELSE 0 
+			END)
+		), 0) AS total_tokens
+	FROM event_deltas
+	WHERE reported_at >= datetime('now', '-' || ? || ' days')
 	GROUP BY day, model_id
 	ORDER BY day DESC, total_tokens DESC;`
 

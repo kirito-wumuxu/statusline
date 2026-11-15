@@ -904,15 +904,21 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
         totalIn: 0,
         totalOut: 0,
         totalTokens: 0,
-        totalCost: 0,
         models: []
       });
     }
     const grp = dateGroups.get(d);
-    grp.totalIn += r.input_tokens || 0;
-    grp.totalOut += r.output_tokens || 0;
-    grp.totalTokens += r.total_tokens || 0;
-    grp.models.push(r);
+    grp.totalIn += (r.total_input_tokens != null ? r.total_input_tokens : (r.input_tokens || 0));
+    grp.totalOut += (r.total_output_tokens != null ? r.total_output_tokens : (r.output_tokens || 0));
+    grp.totalTokens += (r.total_tokens || 0);
+
+    if (r.models && Array.isArray(r.models)) {
+      for (const m of r.models) {
+        grp.models.push(m);
+      }
+    } else {
+      grp.models.push(r);
+    }
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -939,10 +945,13 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
 
     // 模型明细行
     for (const m of grp.models) {
-      const alias = matchModelAlias(m.model, m.model);
-      const modelDisplayName = alias.matched && alias.name ? `${alias.name}` : m.model;
+      const rawModel = m.model_id || m.model || '';
+      const alias = matchModelAlias(rawModel, m.display_name || rawModel);
+      const modelDisplayName = alias.matched && alias.name ? `${alias.name}` : (m.display_name || rawModel || '默认模型');
       const isZero = (m.total_tokens || 0) === 0;
-      const pct = grp.totalTokens > 0 ? ((m.total_tokens / grp.totalTokens) * 100).toFixed(1) : '0.0';
+      const pct = (m.percentage != null && m.percentage > 0)
+        ? m.percentage.toFixed(1)
+        : (grp.totalTokens > 0 ? ((m.total_tokens / grp.totalTokens) * 100).toFixed(1) : '0.0');
 
       html += `
         <tr class="${isZero ? 'zero-row' : ''} hover:bg-slate-800/40 transition">
@@ -1762,8 +1771,8 @@ async function refreshDashboard(forceRedraw = false) {
     if (dailyTokens && Array.isArray(dailyTokens)) {
       for (const row of dailyTokens) {
         if (row.date === todayStr) {
-          todayInput += (row.input_tokens || 0);
-          todayOutput += (row.output_tokens || 0);
+          todayInput += (row.total_input_tokens != null ? row.total_input_tokens : (row.input_tokens || 0));
+          todayOutput += (row.total_output_tokens != null ? row.total_output_tokens : (row.output_tokens || 0));
           todayTokens += (row.total_tokens || 0);
         }
       }

@@ -365,6 +365,166 @@ func TestMultiDayTokenConsumptionDelta(t *testing.T) {
 	}
 }
 
+func TestMultiModelSessionTokenDelta(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "multimodel_delta_test.db")
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	n := node.GetNodeInfo("node_multimodel", "1.0.0")
+
+	ingestEvent := func(sessionID, modelID, displayName string, inTokens, outTokens int64, timeStr string) {
+		payload := fmt.Sprintf(`{
+			"product": "antigravity",
+			"session_id": "%s",
+			"cwd": "/workspace",
+			"model": {"id": "%s", "display_name": "%s"},
+			"context_window": {"total_input_tokens": %d, "total_output_tokens": %d, "context_window_size": 1048576}
+		}`, sessionID, modelID, displayName, inTokens, outTokens)
+		env, _, err := model.ParseAndNormalize([]byte(payload), n)
+		if err != nil {
+			t.Fatalf("failed to parse: %v", err)
+		}
+		env.ReportedAt = timeStr
+		if err := store.Ingest(env); err != nil {
+			t.Fatalf("failed to ingest: %v", err)
+		}
+	}
+
+	// Day 1 (yesterday)
+	tYesterday := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02T15:04:05Z")
+	tYesterdayDate := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02")
+
+	// Session starts with gpt-oss
+	ingestEvent("sess-switch-1", "gpt-oss", "GPT-OSS 120B", 5000, 1000, tYesterday)
+	ingestEvent("sess-switch-1", "gpt-oss", "GPT-OSS 120B", 8000, 2500, tYesterday)
+
+	// User switches to claude-opus in the same session
+	ingestEvent("sess-switch-1", "claude-opus", "Claude Opus", 12000, 4000, tYesterday)
+
+	// User switches to gemini-flash in the same session
+	ingestEvent("sess-switch-1", "gemini-flash", "Gemini Flash", 15000, 6000, tYesterday)
+
+	// User switches back to gpt-oss
+	ingestEvent("sess-switch-1", "gpt-oss", "GPT-OSS 120B", 18000, 7500, tYesterday)
+
+	// Day 2 (today)
+	tToday := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	tTodayDate := time.Now().UTC().Format("2006-01-02")
+
+	// Continues with gemini-flash today
+	ingestEvent("sess-switch-1", "gemini-flash", "Gemini Flash", 20000, 8500, tToday)
+	// Switches to claude-opus today
+	ingestEvent("sess-switch-1", "claude-opus", "Claude Opus", 23000, 9500, tToday)
+
+	// Query daily model tokens
+	daily, err := store.GetDailyModelTokens(7)
+	if err != nil {
+		t.Fatalf("failed to get daily tokens: %v", err)
+	}
+
+	var day1, day2 *DailyTokensSummary
+	for i := range daily {
+		if daily[i].Date == tYesterdayDate {
+			day1 = &daily[i]
+		}
+		if daily[i].Date == tTodayDate {
+			day2 = &daily[i]
+		}
+	}
+
+	if day1 == nil {
+		t.Fatalf("expected day 1 summary for %s, got none", tYesterdayDate)
+	}
+	if day2 == nil {
+		t.Fatalf("expected day 2 summary for %s, got none", tTodayDate)
+	}
+
+	// Verify Day 1:
+	// Total input should be 18000, total output 7500, total tokens 25500
+	if day1.TotalInputTokens != 18000 || day1.TotalOutputTokens != 7500 || day1.TotalTokens != 25500 {
+		t.Errorf("day 1 totals expected in=18000, out=7500, total=25500; got in=%d, out=%d, total=%d",
+			day1.TotalInputTokens, day1.TotalOutputTokens, day1.TotalTokens)
+	}
+
+	// Model breakdown on Day 1:
+	// gpt-oss: in=5000 + 3000(8000-5000) + 3000(18000-15000) = 11000; out=1000 + 1500(2500-1000) + 1500(7500-6000) = 4000; total = 15000
+	// claude-opus: in=4000(12000-8000); out=1500(4000-2500); total = 5500
+	// gemini-flash: in=3000(15000-12000); out=2000(6000-4000); total = 5000
+	modelTokensDay1 := make(map[string]DailyModelToken)
+	var sumDay1ModelTokens int64
+	for _, m := range day1.Models {
+		modelTokensDay1[m.ModelID] = m
+		sumDay1ModelTokens += m.TotalTokens
+	}
+
+	if sumDay1ModelTokens != 25500 {
+		t.Errorf("sum of model tokens on day 1 should be 25500, got %d", sumDay1ModelTokens)
+	}
+
+	gpt := modelTokensDay1["gpt-oss"]
+	if gpt.InputTokens != 11000 || gpt.OutputTokens != 4000 || gpt.TotalTokens != 15000 {
+		t.Errorf("gpt-oss expected in=11000, out=4000, total=15000; got in=%d, out=%d, total=%d",
+			gpt.InputTokens, gpt.OutputTokens, gpt.TotalTokens)
+	}
+
+	claude := modelTokensDay1["claude-opus"]
+	if claude.InputTokens != 4000 || claude.OutputTokens != 1500 || claude.TotalTokens != 5500 {
+		t.Errorf("claude-opus expected in=4000, out=1500, total=5500; got in=%d, out=%d, total=%d",
+			claude.InputTokens, claude.OutputTokens, claude.TotalTokens)
+	}
+
+	gemini := modelTokensDay1["gemini-flash"]
+	if gemini.InputTokens != 3000 || gemini.OutputTokens != 2000 || gemini.TotalTokens != 5000 {
+		t.Errorf("gemini-flash expected in=3000, out=2000, total=5000; got in=%d, out=%d, total=%d",
+			gemini.InputTokens, gemini.OutputTokens, gemini.TotalTokens)
+	}
+
+	// Verify Day 2:
+	// Day 2 delta: in = 23000 - 18000 = 5000; out = 9500 - 7500 = 2000; total = 7000
+	if day2.TotalInputTokens != 5000 || day2.TotalOutputTokens != 2000 || day2.TotalTokens != 7000 {
+		t.Errorf("day 2 totals expected in=5000, out=2000, total=7000; got in=%d, out=%d, total=%d",
+			day2.TotalInputTokens, day2.TotalOutputTokens, day2.TotalTokens)
+	}
+
+	// Model breakdown on Day 2:
+	// gemini-flash: in=2000(20000-18000); out=1000(8500-7500); total = 3000
+	// claude-opus: in=3000(23000-20000); out=1000(9500-8500); total = 4000
+	modelTokensDay2 := make(map[string]DailyModelToken)
+	var sumDay2ModelTokens int64
+	for _, m := range day2.Models {
+		modelTokensDay2[m.ModelID] = m
+		sumDay2ModelTokens += m.TotalTokens
+	}
+
+	if sumDay2ModelTokens != 7000 {
+		t.Errorf("sum of model tokens on day 2 should be 7000, got %d", sumDay2ModelTokens)
+	}
+
+	geminiD2 := modelTokensDay2["gemini-flash"]
+	if geminiD2.InputTokens != 2000 || geminiD2.OutputTokens != 1000 || geminiD2.TotalTokens != 3000 {
+		t.Errorf("day 2 gemini-flash expected in=2000, out=1000, total=3000; got in=%d, out=%d, total=%d",
+			geminiD2.InputTokens, geminiD2.OutputTokens, geminiD2.TotalTokens)
+	}
+
+	claudeD2 := modelTokensDay2["claude-opus"]
+	if claudeD2.InputTokens != 3000 || claudeD2.OutputTokens != 1000 || claudeD2.TotalTokens != 4000 {
+		t.Errorf("day 2 claude-opus expected in=3000, out=1000, total=4000; got in=%d, out=%d, total=%d",
+			claudeD2.InputTokens, claudeD2.OutputTokens, claudeD2.TotalTokens)
+	}
+
+	// Strict Conservation Check:
+	// Total across all days and models must strictly equal the latest session total: 23000 in + 9500 out = 32500 total!
+	grandTotal := day1.TotalTokens + day2.TotalTokens
+	if grandTotal != 32500 {
+		t.Errorf("grand total tokens across all days and models must be 32500, got %d", grandTotal)
+	}
+}
+
 func TestPriorityAliasesStorage(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "priority_test.db")
 	store, err := NewStore(dbPath)

@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
     raw_payload                 TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_session_time ON telemetry_events(session_id, reported_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_session_window ON telemetry_events(session_id, reported_at ASC, id ASC);
 CREATE INDEX IF NOT EXISTS idx_events_node_time ON telemetry_events(node_id, reported_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_reported_at ON telemetry_events(reported_at DESC);
 
