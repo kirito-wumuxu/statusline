@@ -25,8 +25,8 @@
 - **配额余量与倒计时**：
   - Gemini: 明青色标签 `Gemini:`，绿/黄/红余量百分比，暗灰倒计时（`2h10m` / `5d18h`）。
   - Claude: 暖橙色标签 `Claude:`，支持多阶窗口倒计时。
-- **窄屏自适应**：
-  - 依据 `TerminalWidth` 自动执行 Level 1~3 降级缩减，防止终端换行。
+- **窄屏自适应与模块优先级渐进降级**：
+  - 基于模块优先级（`display.priorities`）驱动 3 阶段贪心状态机流水线（Phase 1 渐进短名 -> Phase 2 渐进结构紧凑 -> Phase 3 渐进隐藏剪裁），严格保证状态行 $\le$ `TerminalWidth`，永不自动折行，且最大限度保护高优先级核心指标。
 
 ---
 
@@ -102,7 +102,7 @@
 - **`sessions`**：会话维度快照表，存储产品类型（`antigravity` / `claude_code`）、工作目录、Git 仓库元数据、最新累计 Token、费用与活跃时间。通过 `ON CONFLICT DO UPDATE` 幂等刷新。
 - **`telemetry_events`**：瞬时流水明细表，记录每次问答触发的 Token 消耗、Context Window 使用率、缓存命中率及原始 JSON 备份。
 - **`account_quotas`**：多账号配额实时状态表，聚合记录各账号的 Gemini / Claude 配额余量与冷却重置时间。
-- **`display_aliases`**：显示别名映射表（`category`, `alias_key`, `display_name`, `short_name`），纯 Web 界面管理 + SQLite 持久化（服务端 YAML 零配置），客户端 `statusline init` 时自动拉取同步。
+- **`display_aliases`**：显示别名与模块优先级映射表（`category: quota | model | account | priority`, `alias_key`, `display_name`, `short_name`, `sort_order`），纯 Web 界面管理 + SQLite 持久化（服务端 YAML 零配置），客户端 `statusline init` 时自动拉取同步。
 
 ---
 
