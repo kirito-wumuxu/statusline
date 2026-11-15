@@ -124,8 +124,8 @@ func renderSegment(name string, data *model.StatusLineData, homeDir string, leve
 	case "quota":
 		if level == 0 {
 			return FormatQuota(data)
-		} else if level == 1 {
-			return formatQuotaCompact(data, false, true)
+		} else if level <= 2 {
+			return formatQuotaCompact(data, true, false)
 		}
 		return formatQuotaCompact(data, true, true)
 	default:

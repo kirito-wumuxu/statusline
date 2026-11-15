@@ -366,3 +366,50 @@ func TestDisplayAliasesAndDynamicQuotas(t *testing.T) {
 		t.Errorf("expected [statusline], got %q", plainDirCompact)
 	}
 }
+
+func TestNarrowQuotaBothBucketsWithShortLabel(t *testing.T) {
+	SetAliases(config.DisplayAliasesConfig{
+		Quotas: []config.DisplayAliasItem{
+			{Key: "gemini", Name: "Gemini", ShortName: "G"},
+			{Key: "3p", Name: "Claude", ShortName: "C"},
+		},
+	})
+
+	data := &model.StatusLineData{
+		CWD: "/home/user/workspace/repo/statusline",
+		Model: model.ModelInfo{
+			ID:          "gemini-3.8-flash",
+			DisplayName: "Gemini 3.8 Flash (High)",
+		},
+		Quota: map[string]model.QuotaBucket{
+			"gemini-5h": {
+				RemainingFraction: 0.83,
+				ResetInSeconds:    14640,
+			},
+			"gemini-weekly": {
+				RemainingFraction: 0.90,
+				ResetInSeconds:    349200,
+			},
+			"3p-5h": {
+				RemainingFraction: 0.83,
+				ResetInSeconds:    14640,
+			},
+			"3p-weekly": {
+				RemainingFraction: 0.90,
+				ResetInSeconds:    349200,
+			},
+		},
+		TerminalWidth: 120, // Forces Level 1
+	}
+
+	line := AssembleLine(data, "/home/user")
+	plain := StripANSI(line)
+
+	// Level 1 should preserve both buckets and use short label G: and C:
+	if !strings.Contains(plain, "G: 83%(4h4m) 90%(4d1h)") {
+		t.Errorf("expected 'G: 83%%(4h4m) 90%%(4d1h)' in line, got %q", plain)
+	}
+	if !strings.Contains(plain, "C: 83%(4h4m) 90%(4d1h)") {
+		t.Errorf("expected 'C: 83%%(4h4m) 90%%(4d1h)' in line, got %q", plain)
+	}
+}
