@@ -17,7 +17,7 @@ import (
 	"statusline/internal/vcs"
 )
 
-var Version = "1.0.0"
+var Version = "dev"
 
 func printHelp() {
 	fmt.Printf(`statusline v%s - Terminal statusline plugin for Antigravity & Claude Code

@@ -25,6 +25,8 @@ var embeddedWebFS embed.FS
 
 var webFS fs.FS
 
+var Version = "dev"
+
 func init() {
 	sub, err := fs.Sub(embeddedWebFS, "web")
 	if err == nil {
@@ -36,7 +38,14 @@ func main() {
 	portFlag := flag.Int("port", 0, "HTTP server listening port (default: 8628)")
 	dbFlag := flag.String("db", "", "Path to SQLite database file")
 	configFlag := flag.String("config", "", "Path to server.yaml")
+	versionFlag := flag.Bool("version", false, "Print version information")
+	flag.BoolVar(versionFlag, "v", false, "Print version information")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("statusline-server version %s\n", Version)
+		return
+	}
 
 	cfg, err := config.LoadServerConfig(*configFlag)
 	if err != nil {
