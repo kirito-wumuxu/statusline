@@ -75,8 +75,9 @@ type ServerListenConfig struct {
 }
 
 type StorageConfig struct {
-	DBPath  string `yaml:"db_path"`
-	WALMode bool   `yaml:"wal_mode"`
+	DBPath      string `yaml:"db_path"`
+	WALMode     bool   `yaml:"wal_mode"`
+	ReleasesDir string `yaml:"releases_dir"`
 }
 
 func DefaultSegments() []string {
@@ -144,6 +145,7 @@ func DefaultConfig() *ClientConfig {
 func DefaultServerConfig() *ServerConfig {
 	homeDir, _ := os.UserHomeDir()
 	defaultDB := filepath.Join(homeDir, ".local", "share", "statusline", "statusline.db")
+	defaultReleases := filepath.Join(homeDir, ".local", "share", "statusline", "releases")
 
 	cfg := &ServerConfig{
 		Server: ServerListenConfig{
@@ -152,8 +154,9 @@ func DefaultServerConfig() *ServerConfig {
 			APIKey: "",
 		},
 		Storage: StorageConfig{
-			DBPath:  defaultDB,
-			WALMode: true,
+			DBPath:      defaultDB,
+			WALMode:     true,
+			ReleasesDir: defaultReleases,
 		},
 		Logging: LoggingConfig{
 			Enabled: true,
@@ -335,6 +338,9 @@ func applyServerEnvOverrides(cfg *ServerConfig) {
 	}
 	if dbPath := os.Getenv("STATUSLINE_DB_PATH"); dbPath != "" {
 		cfg.Storage.DBPath = dbPath
+	}
+	if releasesDir := os.Getenv("STATUSLINE_RELEASES_DIR"); releasesDir != "" {
+		cfg.Storage.ReleasesDir = releasesDir
 	}
 	applyLoggingEnvOverrides(&cfg.Logging)
 }

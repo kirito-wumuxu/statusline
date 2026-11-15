@@ -67,6 +67,16 @@ func (s *Server) routes() {
 	s.router.HandleFunc("DELETE /api/v1/config/aliases", s.handleDeleteAlias)
 	s.router.HandleFunc("DELETE /api/config/aliases", s.handleDeleteAlias)
 
+	// Version & Upgrade Distribution APIs
+	s.router.HandleFunc("GET /api/v1/version", s.handleGetVersion)
+	s.router.HandleFunc("GET /api/version", s.handleGetVersion)
+	s.router.HandleFunc("GET /api/v1/upgrade/download", s.handleDownloadUpgrade)
+	s.router.HandleFunc("GET /api/upgrade/download", s.handleDownloadUpgrade)
+	s.router.HandleFunc("POST /api/v1/upgrade/upload", s.handleUploadReleases)
+	s.router.HandleFunc("POST /api/upgrade/upload", s.handleUploadReleases)
+	s.router.HandleFunc("POST /api/v1/upgrade/sync-github", s.handleSyncGitHub)
+	s.router.HandleFunc("POST /api/upgrade/sync-github", s.handleSyncGitHub)
+
 	// Embedded Web Dashboard
 	if s.webFS != nil {
 		fileServer := http.FileServer(http.FS(s.webFS))
