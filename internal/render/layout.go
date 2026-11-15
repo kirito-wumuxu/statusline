@@ -98,7 +98,10 @@ func buildLine(data *model.StatusLineData, homeDir string, segments []string, le
 func renderSegment(name string, data *model.StatusLineData, homeDir string, level int) string {
 	switch name {
 	case "dir", "cwd":
-		return FormatDir(data, homeDir)
+		if level == 0 {
+			return FormatDir(data, homeDir)
+		}
+		return FormatDirCompact(data, homeDir)
 	case "vcs", "git":
 		return FormatVCS(data)
 	case "account", "user", "email":
@@ -107,7 +110,7 @@ func renderSegment(name string, data *model.StatusLineData, homeDir string, leve
 		}
 		return formatAccountCompact(data)
 	case "model":
-		if level == 0 {
+		if level <= 1 {
 			return FormatModel(data)
 		}
 		return formatModelCompact(data)
@@ -122,9 +125,9 @@ func renderSegment(name string, data *model.StatusLineData, homeDir string, leve
 		if level == 0 {
 			return FormatQuota(data)
 		} else if level == 1 {
-			return formatQuotaCompact(data, false)
+			return formatQuotaCompact(data, false, true)
 		}
-		return formatQuotaCompact(data, true)
+		return formatQuotaCompact(data, true, true)
 	default:
 		return ""
 	}
@@ -209,7 +212,7 @@ func formatContextCompact(data *model.StatusLineData) string {
 	return sb.String()
 }
 
-func formatQuotaCompact(data *model.StatusLineData, singleBucketOnly bool) string {
+func formatQuotaCompact(data *model.StatusLineData, useShortLabel bool, singleBucketOnly bool) string {
 	groups := extractProviderGroups(data)
 	if len(groups) == 0 {
 		return ""
@@ -230,7 +233,11 @@ func formatQuotaCompact(data *model.StatusLineData, singleBucketOnly bool) strin
 			dur := FormatDurationCompact(b.bucket.ResetInSeconds)
 			bItems = append(bItems, formatBucketItem(b.remaining, dur))
 		}
-		label := fmt.Sprintf("%s%s:%s", g.color, g.shortName, AnsiReset)
+		labelName := g.name
+		if useShortLabel && g.shortName != "" {
+			labelName = g.shortName
+		}
+		label := fmt.Sprintf("%s%s:%s", g.color, labelName, AnsiReset)
 		parts = append(parts, fmt.Sprintf("%s %s", label, strings.Join(bItems, " ")))
 	}
 

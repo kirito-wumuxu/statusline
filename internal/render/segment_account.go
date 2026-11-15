@@ -34,9 +34,12 @@ func formatAccountCompact(data *model.StatusLineData) string {
 	if email == "" {
 		return ""
 	}
-	_, shortName := MatchAccountAlias(email)
+	displayName, shortName := MatchAccountAlias(email)
 	if shortName != "" {
 		return fmt.Sprintf("%s<%s%s%s>%s", AnsiDarkGray, AnsiAmber, shortName, AnsiDarkGray, AnsiReset)
+	}
+	if displayName != "" {
+		return fmt.Sprintf("%s<%s%s%s>%s", AnsiDarkGray, AnsiAmber, displayName, AnsiDarkGray, AnsiReset)
 	}
 
 	prefix := email

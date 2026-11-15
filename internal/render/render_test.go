@@ -314,7 +314,7 @@ func TestDisplayAliasesAndDynamicQuotas(t *testing.T) {
 	}
 
 	// 2. Compact mode rendering: G:, Ar:, C:
-	plainCompact := StripANSI(formatQuotaCompact(data, false))
+	plainCompact := StripANSI(formatQuotaCompact(data, true, false))
 	if !strings.Contains(plainCompact, "G: 90%(2h0m)") {
 		t.Errorf("expected G: in compact quota, got %q", plainCompact)
 	}
@@ -345,5 +345,24 @@ func TestDisplayAliasesAndDynamicQuotas(t *testing.T) {
 	plainAccountCompact := StripANSI(formatAccountCompact(data))
 	if plainAccountCompact != "<Dev>" {
 		t.Errorf("expected <Dev> in compact account, got %q", plainAccountCompact)
+	}
+
+	// 6. Account alias with empty short_name should fall back to Name in compact mode
+	dataEmptyShort := &model.StatusLineData{Email: "kirito.wu.huhu@gmail.com"}
+	SetAliases(config.DisplayAliasesConfig{
+		Accounts: []config.DisplayAliasItem{
+			{Key: "kirito.wu.huhu@gmail.com", Name: "kirito", ShortName: ""},
+		},
+	})
+	plainAccFallback := StripANSI(formatAccountCompact(dataEmptyShort))
+	if plainAccFallback != "<kirito>" {
+		t.Errorf("expected <kirito> in compact account when short_name is empty, got %q", plainAccFallback)
+	}
+
+	// 7. FormatDirCompact
+	dataDir := &model.StatusLineData{CWD: "/home/user/workspace/repo/statusline"}
+	plainDirCompact := StripANSI(FormatDirCompact(dataDir, "/home/user"))
+	if plainDirCompact != "[statusline]" {
+		t.Errorf("expected [statusline], got %q", plainDirCompact)
 	}
 }

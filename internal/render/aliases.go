@@ -95,5 +95,5 @@ func MatchAccountAlias(email string) (name, shortName string) {
 		}
 	}
 
-	return email, ""
+	return "", ""
 }
