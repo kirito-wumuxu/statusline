@@ -44,6 +44,7 @@
 ## 🚀 核心特性
 
 - **⚡ 极致响应性能**：标准输入解析 + 终端 ANSI 排版输出全程低于 2ms，交互体验零延迟。
+- **🔄 原地零干扰安全自我升级 (`statusline upgrade`)**：跨平台（Linux Inode 原子重命名 / Windows `.old` 规避文件锁）原地安全自替换；独创双源分发机制，优先直连内网/本地 `statusline-server` 毫秒级极速下载，无法连接时平滑回退至 GitHub Releases 官方源；纯 Go 资产解压与 SHA256 完整性校验，无需系统 `tar`/`unzip`。
 - **🛡️ 纯 Go 零 CGO 静态二进制**：依赖 `modernc.org/sqlite`，在 Windows、Linux 与 macOS 上均可单一二进制独立运行，无需安装 gcc、cgo 或任何运行时环境。
 - **🎯 账号模型配额池与双层同心圆环**：208px 巨型 SVG 双层同心圆环仪表盘，外环 5 小时短期窗口，内环 7 天周度窗口；以单个配额模型为最小原子单元，账号卡片根据实体数量自适应跨列（1~4 列），宽屏大屏充分利用空间。
 - **🏷️ 统一显示别名管理与手动排序**：纯 Web 页面可视化管理账号/模型/配额实体别名映射，服务端 YAML 零配置；支持账号手动设置 `sort_order` 与快捷上下微调调整配额池展示顺序；`statusline init` 自动拉取同步至本地供离线渲染。
@@ -107,7 +108,37 @@ statusline init
 > - `statusline init -settings /path/to/settings.json`：指定自定义配置文件路径；
 > - `statusline init -bin /custom/bin/statusline`：指定自定义二进制路径。
 
-### 2. 手动接入配置说明
+### 2. 客户端一键原地自我升级 (`statusline upgrade` 或 `statusline update`)
+
+`statusline` 支持跨平台原子原地安全自替换（Linux 下 Inode 原地原子重命名，Windows 下 `.old` 重命名规避文件锁）：
+
+```bash
+# 检查并一键安全升级到最新发布版本 (带交互确认)
+statusline upgrade
+
+# 也可以使用 update 简短别名
+statusline update
+
+# 静默升级 (免确认，适用于脚本或自动化环境)
+statusline upgrade -y
+
+# 仅检查是否有可用新版本，不执行下载与安装
+statusline upgrade -check
+
+# 同时升级同目录下的 statusline-server 服务端程序
+statusline upgrade -all
+
+# 升级或回退至指定版本
+statusline upgrade -version v0.2.0
+
+# 明确指定更新源 (auto: 优先服务端回退GitHub; server: 仅服务端; github: 仅GitHub)
+statusline upgrade -source server
+```
+
+> **双源高可用与极速分发**：
+> 客户端默认采用 `auto` 模式，优先探测 `client.yaml` 中配置的 `statusline-server`（国内或内网环境极速直连，不依赖 GitHub 网络，零 Rate Limit 限制）；当自建服务端无法连接或未托管发布包时，自动平滑回退至官方 GitHub Releases 下载。
+
+### 3. 手动接入配置说明
 
 若需手动维护配置文件：
 - **Antigravity CLI**（`~/.gemini/antigravity-cli/settings.json`）：
@@ -131,7 +162,7 @@ statusline init
   ```
   *(也可使用环境变量 `export CLAUDE_STATUSLINE_COMMAND="/absolute/path/to/statusline"`)*
 
-### 3. 环境变量与无服务器模式 (Pure Local)
+### 4. 环境变量与无服务器模式 (Pure Local)
 
 - **自定义服务端上报地址**：
   ```bash
@@ -142,7 +173,7 @@ statusline init
   export STATUSLINE_SERVER_URL="off"
   ```
 
-### 4. 客户端配置与模块化排序 (`client.yaml`)
+### 5. 客户端配置与模块化排序 (`client.yaml`)
 
 客户端配置默认自动从**二进制所在目录**下检索 `client.yaml`，亦支持当前工作目录 `./client.yaml` 或用户全局目录 `~/.config/statusline/client.yaml`（可通过环境变量 `STATUSLINE_CLIENT_CONFIG` 明确指定）：
 
@@ -236,6 +267,7 @@ statusline-server -config server.yaml -port 8628 -db ~/.local/share/statusline/s
 - **💻 活跃终端会话 (按项目聚合)**：按工作区项目目录自动分组聚合，清晰呈现每个项目的多会话状态、Git 分支、模型、上下文进度与实时 Token 消耗。
 - **📊 每日各模型 Token 消耗**：基于精准的基线差值算法，按日期统计各模型实际输入/输出 Token 吞吐与占比，长会话跨天不重复计费，空转心跳不虚报消耗。
 - **🏷️ 显示别名与排序管理**：纯 Web 页面可视化管理账号、模型与配额前缀映射规则；账号支持设置 `sort_order` 或快捷上下移动调整配额池顺序；客户端 `statusline init` 时自动拉取同步至本地。
+- **📦 版本发布与分发管理**：管理服务端托管的跨平台发布包，支持浏览器拖拽上传 `.tar.gz`/`.zip`/`checksums.txt`，以及一键从 GitHub Releases 官方源拉取同步，各节点客户端执行 `statusline upgrade` 时优先直连本地高速下载。
 - **🐞 调试原始上报**：展示最近 5 次客户端上报的原始 JSON 信封，方便开发者一键排查终端 CLI 推送明细。
 
 ---
@@ -291,24 +323,27 @@ go test ./... -v
 
 ```bash
 # Linux
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline ./cmd/statusline
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline-server ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline ./cmd/statusline
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline-server ./cmd/statusline-server
 
 # Windows
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline.exe ./cmd/statusline
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline-server.exe ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline.exe ./cmd/statusline
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline-server.exe ./cmd/statusline-server
 
 # macOS (Apple Silicon)
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/statusline ./cmd/statusline
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/statusline-server ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline ./cmd/statusline
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline-server ./cmd/statusline-server
 ```
 
-### 3. 一键打包全平台 Release
+### 3. 一键打包全平台 Release 与自动上传
 
 ```bash
-./scripts/build-release.sh v0.1.5
+# 打包全平台发布包并在 dist/ 生成 checksums.txt
+./scripts/build-release.sh v0.2.0
+
+# 打包并一键直传到 statusline-server 本地/内网分发中心:
+./scripts/build-release.sh v0.2.0 --upload http://127.0.0.1:8628 --api-key <secret>
 ```
-该脚本将自动在 `dist/` 目录下生成各平台压缩包并输出 `checksums.txt`。
 
 ---
 

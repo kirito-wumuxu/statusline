@@ -72,6 +72,7 @@ func main() {
 	defer store.Close()
 
 	srv := server.NewServer(cfg, store, webFS)
+	srv.SetVersion(Version)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	if cfg.Server.Host == "0.0.0.0" || cfg.Server.Host == "" {

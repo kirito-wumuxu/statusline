@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"statusline/internal/config"
@@ -21,7 +22,11 @@ import (
 var Version = "dev"
 
 func printHelp() {
-	fmt.Printf(`statusline v%s - Terminal statusline plugin for Antigravity & Claude Code
+	displayVer := Version
+	if !strings.HasPrefix(displayVer, "v") && !strings.HasPrefix(displayVer, "V") && displayVer != "dev" {
+		displayVer = "v" + displayVer
+	}
+	fmt.Printf(`statusline %s - Terminal statusline plugin for Antigravity & Claude Code
 
 Usage:
   statusline                    Render statusline from stdin JSON (called by AI CLI)
@@ -113,10 +118,10 @@ func main() {
 				os.Exit(1)
 			}
 			return
-		case "--version", "-v", "version":
+		case "--version", "-v", "-version", "version":
 			fmt.Printf("statusline version %s\n", Version)
 			return
-		case "--help", "-h", "help":
+		case "--help", "-h", "-help", "help":
 			printHelp()
 			return
 		}

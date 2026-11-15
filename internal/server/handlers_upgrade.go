@@ -22,9 +22,14 @@ func (s *Server) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	serverVer := s.version
+	if serverVer == "" {
+		serverVer = "dev"
+	}
+
 	res := map[string]interface{}{
 		"status":            "ok",
-		"server_version":    "v0.1.5",
+		"server_version":    serverVer,
 		"latest_version":    catalog.LatestVersion,
 		"upgrade_supported": catalog.UpgradeSupported,
 		"assets":            catalog.Assets,

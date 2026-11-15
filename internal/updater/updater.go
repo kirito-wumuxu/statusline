@@ -17,12 +17,14 @@ import (
 
 // UpgradeOptions specifies options for upgrading statusline.
 type UpgradeOptions struct {
-	CheckOnly    bool
-	UpgradeAll   bool
-	TargetTag    string
-	ForcedSource string
-	Yes          bool
-	CurrentVer   string
+	CheckOnly        bool
+	UpgradeAll       bool
+	TargetTag        string
+	ForcedSource     string
+	Yes              bool
+	CurrentVer       string
+	TargetExecutable string               // optional override for testing or custom paths
+	ClientConfig     *config.ClientConfig // optional client config for testing
 }
 
 // RunUpgrade parses CLI flags and executes the self-upgrade process.
@@ -55,9 +57,13 @@ func RunUpgrade(args []string, currentVer string, out io.Writer) error {
 
 // ExecuteUpgrade carries out the upgrade workflow with the given options.
 func ExecuteUpgrade(opts UpgradeOptions, out io.Writer) error {
-	execPath, err := GetExecutablePath()
-	if err != nil {
-		return fmt.Errorf("failed to locate current executable: %w", err)
+	execPath := opts.TargetExecutable
+	var err error
+	if execPath == "" {
+		execPath, err = GetExecutablePath()
+		if err != nil {
+			return fmt.Errorf("failed to locate current executable: %w", err)
+		}
 	}
 
 	CleanupOldExecutables(execPath)
@@ -79,7 +85,10 @@ func ExecuteUpgrade(opts UpgradeOptions, out io.Writer) error {
 
 	// 2. Resolve update source
 	fmt.Fprintf(out, "[2/4] 正在探测可用更新源 (模式: %s)...\n", opts.ForcedSource)
-	cfg, _ := config.LoadClientConfig("")
+	cfg := opts.ClientConfig
+	if cfg == nil {
+		cfg, _ = config.LoadClientConfig("")
+	}
 	src, err := ResolveSource(cfg, opts.ForcedSource)
 	if err != nil {
 		return fmt.Errorf("无法确定更新源: %w", err)

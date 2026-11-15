@@ -66,6 +66,16 @@
 │   │   └── segment_vcs.go          # Git 分支与脏标记
 │   ├── vcs/                        # Git 超时探测工具 (20ms 熔断)
 │   ├── reporter/                   # 客户端非阻塞异步上报器 (100ms 超时，静默丢弃异常)
+│   ├── updater/                    # 跨平台原地自我升级引擎 (SemVer比对、解压、校验、原子替换、双源探测)
+│   │   ├── version.go              # SemVer 语义化版本解析与比较
+│   │   ├── extract.go              # 纯 Go 标准库 (.tar.gz / .zip) 解压与 SHA256 校验
+│   │   ├── replace.go              # 跨平台原地原子替换调度
+│   │   ├── replace_unix.go         # Unix/Linux Inode 原子重命名与跨分区拷贝替换
+│   │   ├── replace_windows.go      # Windows .old 重命名与启动清理规避文件锁
+│   │   ├── source.go               # 双源接口与 ReleaseInfo 抽象
+│   │   ├── source_server.go        # 自建 statusline-server 分发源与下载器
+│   │   ├── source_github.go        # GitHub Releases 官方分发源
+│   │   └── updater.go              # 升级 CLI 流程编排与终端交互
 │   ├── storage/                    # SQLite3 WAL 存储引擎 (nodes, sessions, events, quotas)
 │   │   ├── schema.sql              # 数据库建表 DDL
 │   │   ├── db.go                   # 数据库连接池与自动 Migrate
@@ -73,6 +83,9 @@
 │   └── server/                     # 服务端 HTTP 路由与控制器
 │       ├── handlers_report.go      # POST /api/v1/report
 │       ├── handlers_api.go         # GET /api/v1/sessions, overview, quotas, tokens/daily, debug/raw
+│       ├── handlers_upgrade.go     # GET /api/v1/version, GET /api/v1/upgrade/download
+│       ├── handlers_release_mgr.go # POST /api/v1/upgrade/upload, POST /api/v1/upgrade/sync-github (API Key 保护)
+│       ├── release_scanner.go      # 本地发布包 SemVer 目录扫描与校验和解析
 │       ├── middleware.go           # HTTP 请求结构化访问日志中间件
 │       └── refresher.go            # 终端空闲重绘调度
 ├── test/
@@ -98,19 +111,23 @@
 ### 编译本地二进制 (支持 Windows / Linux 跨平台零 CGO 静态编译)
 ```bash
 # Linux amd64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline ./cmd/statusline
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline-server ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline ./cmd/statusline
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline-server ./cmd/statusline-server
 
 # Windows amd64
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline.exe ./cmd/statusline
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/statusline-server.exe ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline.exe ./cmd/statusline
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline-server.exe ./cmd/statusline-server
 ```
 
-### 构建全平台发布包 (Release Assets)
+### 构建全平台发布包与自动上传 (Release Assets)
 ```bash
-./scripts/build-release.sh v0.1.2
+# 构建发布包
+./scripts/build-release.sh v0.2.0
+
+# 构建并自动上传至本地或局域网 statusline-server 分发中心:
+./scripts/build-release.sh v0.2.0 --upload http://127.0.0.1:8628 --api-key <secret>
 ```
-推送版本 Tag（如 `git tag v0.1.2 && git push origin v0.1.2`）将自动触发 GitHub Actions 构建并发布 Release。
+推送版本 Tag（如 `git tag v0.2.0 && git push origin v0.2.0`）将自动触发 GitHub Actions 构建并发布 Release。
 
 ### 运行测试
 ```bash
@@ -121,12 +138,25 @@ go test ./... -v
 ```bash
 ./bin/statusline-server -port 8628 -db ~/.local/share/statusline/statusline.db
 ```
-浏览器访问 `http://127.0.0.1:8628` 即可打开实时深色 Web 监控仪表盘（默认配置文件自动在二进制所在目录下检索 `server.yaml`）。
+浏览器访问 `http://127.0.0.1:8628` 即可打开实时深色 Web 监控仪表盘（默认配置文件自动在二进制所在目录下检索 `server.yaml`，顶部支持「🏷️ 别名映射」与「📦 版本管理」）。
 
-### 客户端接入配置
+### 客户端接入与维护命令
 - **一键配置 Antigravity CLI 与 Claude Code**:
   ```bash
   statusline init
+  ```
+  自动解析当前运行二进制的绝对路径（原地生效，无需移动），并自动配置：
+  - Antigravity: `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`）
+  - Claude Code: `~/.claude/settings.json`（及工作区 `.claude/settings.json`）
+  支持 `-target [all|agy|claude]` 过滤目标工具。客户端默认在二进制所在目录下检索 `client.yaml`。
+- **客户端一键原地自我升级 (`statusline upgrade` 或 `statusline update`)**:
+  ```bash
+  statusline upgrade               # 检查并一键安全升级到最新版
+  statusline upgrade -check        # 仅检查是否有新版本，不执行下载与安装
+  statusline upgrade -all          # 升级 statusline 同时自动升级同目录下的 statusline-server
+  statusline upgrade -version v0.2.0 # 升级或回退至指定版本
+  statusline upgrade -source server # 指定更新源 (auto: 优先服务端回退GitHub, server: 仅服务端, github: 仅GitHub)
+  statusline upgrade -y            # 静默升级，跳过终端交互确认
   ```
   自动解析当前运行二进制的绝对路径（原地生效，无需移动），并自动配置：
   - Antigravity: `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`）

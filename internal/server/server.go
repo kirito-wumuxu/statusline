@@ -9,18 +9,24 @@ import (
 )
 
 type Server struct {
-	cfg    *config.ServerConfig
-	store  *storage.Store
-	router *http.ServeMux
-	webFS  fs.FS
+	cfg     *config.ServerConfig
+	store   *storage.Store
+	router  *http.ServeMux
+	webFS   fs.FS
+	version string
+}
+
+func (s *Server) SetVersion(v string) {
+	s.version = v
 }
 
 func NewServer(cfg *config.ServerConfig, store *storage.Store, webFS fs.FS) *Server {
 	s := &Server{
-		cfg:    cfg,
-		store:  store,
-		router: http.NewServeMux(),
-		webFS:  webFS,
+		cfg:     cfg,
+		store:   store,
+		router:  http.NewServeMux(),
+		webFS:   webFS,
+		version: "dev",
 	}
 	s.routes()
 	return s
