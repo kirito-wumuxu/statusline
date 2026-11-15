@@ -51,6 +51,7 @@ type DisplayConfig struct {
 	EnableStdout bool     `yaml:"enable_stdout"`
 	Format       string   `yaml:"format"`
 	Segments     []string `yaml:"segments"`
+	Priorities   []string `yaml:"priorities"`
 }
 
 // LoggingConfig controls the structured logging subsystem.
@@ -84,6 +85,10 @@ func DefaultSegments() []string {
 	return []string{"dir", "vcs", "account", "model", "context", "tokens", "quota"}
 }
 
+func DefaultPriorities() []string {
+	return []string{"model", "context", "quota", "vcs", "tokens", "account", "dir"}
+}
+
 // getExeDir returns the absolute directory containing the current executable, resolving symlinks.
 var getExeDir = defaultGetExeDir
 
@@ -112,6 +117,7 @@ func DefaultClientConfig() *ClientConfig {
 		Display: DisplayConfig{
 			EnableStdout: true,
 			Segments:     DefaultSegments(),
+			Priorities:   DefaultPriorities(),
 		},
 		Aliases: DisplayAliasesConfig{
 			Quotas: []DisplayAliasItem{
@@ -225,6 +231,9 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 	}
 	if len(cfg.Display.Segments) == 0 {
 		cfg.Display.Segments = DefaultSegments()
+	}
+	if len(cfg.Display.Priorities) == 0 {
+		cfg.Display.Priorities = DefaultPriorities()
 	}
 
 	applyClientEnvOverrides(cfg)

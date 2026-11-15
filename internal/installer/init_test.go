@@ -212,7 +212,12 @@ func TestSyncAliasesFromRemote(t *testing.T) {
 	aliasesJSON := `{
 		"quotas": [{"key": "gemini", "name": "Gemini", "short_name": "G"}],
 		"models": [{"key": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "short_name": "Flash"}],
-		"accounts": [{"key": "test@example.com", "name": "Tester", "short_name": "Test"}]
+		"accounts": [{"key": "test@example.com", "name": "Tester", "short_name": "Test"}],
+		"priorities": [
+			{"key": "model", "sort_order": 1},
+			{"key": "context", "sort_order": 2},
+			{"key": "dir", "sort_order": 7}
+		]
 	}`
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/api/v1/config/aliases") {
@@ -238,7 +243,7 @@ func TestSyncAliasesFromRemote(t *testing.T) {
 	SyncAliasesFromRemote(&out)
 
 	outStr := out.String()
-	if !strings.Contains(outStr, "成功从服务端同步别名映射") {
+	if !strings.Contains(outStr, "成功从服务端同步别名与优先级映射") {
 		t.Errorf("expected sync success message, got: %s", outStr)
 	}
 
@@ -248,5 +253,8 @@ func TestSyncAliasesFromRemote(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "short_name: Flash") {
 		t.Errorf("expected client.yaml to contain updated aliases, got: %s", string(data))
+	}
+	if !strings.Contains(string(data), "priorities:") {
+		t.Errorf("expected client.yaml to contain priorities, got: %s", string(data))
 	}
 }

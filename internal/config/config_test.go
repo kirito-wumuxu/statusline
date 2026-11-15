@@ -20,6 +20,15 @@ func TestDefaultClientConfig(t *testing.T) {
 	if cfg.Display.Segments[2] != "account" {
 		t.Fatalf("expected 3rd segment to be account, got %s", cfg.Display.Segments[2])
 	}
+	if len(cfg.Display.Priorities) != 7 {
+		t.Fatalf("expected 7 default priorities, got %d", len(cfg.Display.Priorities))
+	}
+	if cfg.Display.Priorities[0] != "model" {
+		t.Fatalf("expected first priority to be model, got %s", cfg.Display.Priorities[0])
+	}
+	if cfg.Display.Priorities[6] != "dir" {
+		t.Fatalf("expected last priority to be dir, got %s", cfg.Display.Priorities[6])
+	}
 	if cfg.Logging.Enabled {
 		t.Fatalf("expected default client logging to be disabled")
 	}

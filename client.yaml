@@ -37,6 +37,15 @@ display:
     - context
     - tokens
     - quota
+  # 模块优先级保护排序（由高到低）：排在前面的模块最受保护，排在后面的模块在屏幕空间不足时最先被缩略或隐藏
+  priorities:
+    - model
+    - context
+    - quota
+    - vcs
+    - tokens
+    - account
+    - dir
 
 # 显示别名与窄屏缩写映射（执行 statusline init 可从 statusline-server 自动拉取更新）
 aliases:

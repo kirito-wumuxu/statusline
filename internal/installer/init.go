@@ -271,10 +271,21 @@ func SyncAliasesFromRemote(out io.Writer) {
 		})
 	}
 
+	if len(remoteAliases.Priorities) > 0 {
+		fileCfg.Display.Priorities = make([]string, 0, len(remoteAliases.Priorities))
+		for _, p := range remoteAliases.Priorities {
+			if p.Key != "" {
+				fileCfg.Display.Priorities = append(fileCfg.Display.Priorities, p.Key)
+			}
+		}
+	} else if len(fileCfg.Display.Priorities) == 0 {
+		fileCfg.Display.Priorities = config.DefaultPriorities()
+	}
+
 	outBytes, err := yaml.Marshal(&fileCfg)
 	if err == nil {
 		_ = os.WriteFile(clientYamlPath, outBytes, 0644)
-		fmt.Fprintf(out, "✔ 成功从服务端同步别名映射并写入 %s: %d 个配额规则, %d 个模型规则, %d 个账号规则\n",
-			clientYamlPath, len(fileCfg.Aliases.Quotas), len(fileCfg.Aliases.Models), len(fileCfg.Aliases.Accounts))
+		fmt.Fprintf(out, "✔ 成功从服务端同步别名与优先级映射并写入 %s: %d 个配额规则, %d 个模型规则, %d 个账号规则, %d 项模块优先级\n",
+			clientYamlPath, len(fileCfg.Aliases.Quotas), len(fileCfg.Aliases.Models), len(fileCfg.Aliases.Accounts), len(fileCfg.Display.Priorities))
 	}
 }
