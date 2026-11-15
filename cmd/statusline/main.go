@@ -14,6 +14,7 @@ import (
 	"statusline/internal/node"
 	"statusline/internal/render"
 	"statusline/internal/reporter"
+	"statusline/internal/updater"
 	"statusline/internal/vcs"
 )
 
@@ -25,14 +26,27 @@ func printHelp() {
 Usage:
   statusline                    Render statusline from stdin JSON (called by AI CLI)
   statusline init [options]     Auto-configure settings.json for Antigravity & Claude Code
+  statusline upgrade [options]  Self-upgrade statusline to the latest release
+  statusline update [options]   Alias for upgrade
   statusline --version, -v      Print version information
   statusline --help, -h         Show this help message
+
+Upgrade Options:
+  -check                        Check for new version without downloading or installing
+  -all                          Also upgrade statusline-server if present in same directory
+  -version <tag>                Target version tag to install (default: latest)
+  -source <auto|server|github>  Update source (default: auto)
+  -y, --yes                     Skip confirmation prompts
 
 Init Options:
   -target <all|agy|claude>      Target CLI to configure (default: all)
   -settings <path>              Specify custom path to settings.json
   -bin <path>                   Specify custom binary path (default: in-place binary location)
 `, Version)
+}
+
+func runUpgradeCommand(args []string, out io.Writer) error {
+	return updater.RunUpgrade(args, Version, out)
 }
 
 func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
@@ -90,6 +104,12 @@ func main() {
 		case "init":
 			if err := installer.RunInit(os.Args[2:], os.Stdout); err != nil {
 				fmt.Fprintf(os.Stderr, "Error initializing statusline: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "upgrade", "update":
+			if err := runUpgradeCommand(os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "Error upgrading statusline: %v\n", err)
 				os.Exit(1)
 			}
 			return
