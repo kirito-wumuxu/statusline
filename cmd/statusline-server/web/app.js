@@ -107,7 +107,14 @@ window.promptApiKey = function() {
 };
 
 async function requestWithAuth(url, options = {}) {
-  options.headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+  const authHeaders = getAuthHeaders();
+  if (options.body instanceof FormData) {
+    delete authHeaders['Content-Type'];
+  }
+  options.headers = { ...authHeaders, ...(options.headers || {}) };
+  if (options.body instanceof FormData && options.headers['Content-Type'] === 'application/json') {
+    delete options.headers['Content-Type'];
+  }
   let res = await fetch(url, options);
   if (res.status === 401) {
     const currentKey = localStorage.getItem('statusline_api_key') || '';
@@ -124,7 +131,14 @@ async function requestWithAuth(url, options = {}) {
       }
       updateApiKeyBtnText();
       // 使用最新输入的密钥重试请求
-      options.headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+      const retryAuthHeaders = getAuthHeaders();
+      if (options.body instanceof FormData) {
+        delete retryAuthHeaders['Content-Type'];
+      }
+      options.headers = { ...retryAuthHeaders, ...(options.headers || {}) };
+      if (options.body instanceof FormData && options.headers['Content-Type'] === 'application/json') {
+        delete options.headers['Content-Type'];
+      }
       res = await fetch(url, options);
     }
   }
@@ -1353,7 +1367,182 @@ window.quickAddAlias = function(category, key, defaultName, defaultShort, defaul
   }, 100);
 };
 
-// 7. 全局看板数据拉取与刷新
+function formatBytes(bytes) {
+  if (bytes === 0 || !bytes) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// 7. 版本分发与发布包管理 (Release Packages & Upgrade Distribution)
+window.toggleReleasesModal = function(show) {
+  const modal = document.getElementById('releases-modal');
+  if (!modal) return;
+  modal.classList.toggle('hidden', !show);
+  if (show) {
+    loadReleases();
+  }
+};
+
+async function loadReleases() {
+  const tbody = document.getElementById('releases-tbody');
+  if (!tbody) return;
+  try {
+    const res = await fetch(getApiUrl('api/v1/version'));
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    const data = await res.json();
+    renderReleasesTable(data);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-rose-400">加载发布包失败: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function renderReleasesTable(catalog) {
+  const tbody = document.getElementById('releases-tbody');
+  if (!tbody) return;
+
+  const packages = catalog.packages || [];
+  if (packages.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="py-8 text-center text-slate-500">
+          <div class="text-xl mb-1">📭</div>
+          <div>当前服务端暂无托管的发布包</div>
+          <div class="text-[11px] text-slate-600 mt-1">请拖拽安装包到上方区域上传，或点击右上角「从 GitHub 同步最新 Release」</div>
+        </td>
+      </tr>`;
+    return;
+  }
+
+  let html = '';
+  packages.forEach(pkg => {
+    const isLatest = catalog.latest_version && pkg.version === catalog.latest_version;
+    const verBadge = isLatest
+      ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">${escapeHtml(pkg.version)} (最新)</span>`
+      : `<span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">${escapeHtml(pkg.version)}</span>`;
+
+    const platColor = pkg.platform.includes('windows')
+      ? 'text-sky-300'
+      : pkg.platform.includes('darwin')
+      ? 'text-purple-300'
+      : 'text-amber-300';
+    const platBadge = `<span class="mono ${platColor}">${escapeHtml(pkg.platform)}</span>`;
+
+    const checksumShort = pkg.checksum
+      ? `<span class="text-slate-400 hover:text-white cursor-pointer" title="SHA256: ${escapeHtml(pkg.checksum)}">${escapeHtml(pkg.checksum.substring(0, 8))}...</span>`
+      : `<span class="text-slate-600">--</span>`;
+
+    const downloadUrl = getApiUrl(pkg.download_path || `api/v1/upgrade/download?filename=${encodeURIComponent(pkg.filename)}`);
+
+    html += `
+      <tr class="hover:bg-slate-900/40 transition">
+        <td class="py-2.5 px-3 text-white flex items-center gap-2">
+          <span>📦</span>
+          <span>${escapeHtml(pkg.filename)}</span>
+        </td>
+        <td class="py-2.5 px-3">${verBadge}</td>
+        <td class="py-2.5 px-3">${platBadge}</td>
+        <td class="py-2.5 px-3 text-slate-400">${formatBytes(pkg.size)}</td>
+        <td class="py-2.5 px-3">${checksumShort}</td>
+        <td class="py-2.5 px-3 text-right">
+          <a href="${downloadUrl}" download class="text-sky-400 hover:text-sky-300 font-medium hover:underline">下载</a>
+        </td>
+      </tr>`;
+  });
+
+  tbody.innerHTML = html;
+}
+
+window.syncReleasesFromGitHub = async function() {
+  const btn = document.getElementById('btn-sync-github');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '↻ 同步中 (可能需要数十秒)...';
+  }
+  const statusEl = document.getElementById('upload-status');
+  if (statusEl) {
+    statusEl.classList.remove('hidden');
+    statusEl.className = 'text-xs text-sky-400 mt-2 mono';
+    statusEl.textContent = '正在从 GitHub Releases 下载最新安装包并缓存至本地...';
+  }
+
+  try {
+    const res = await requestWithAuth(getApiUrl('api/v1/upgrade/sync-github'), {
+      method: 'POST'
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    const data = await res.json();
+    const count = data.downloaded ? data.downloaded.length : 0;
+    if (statusEl) {
+      statusEl.className = 'text-xs text-emerald-400 mt-2 mono';
+      statusEl.textContent = `同步成功! 已下载版本 ${data.version || ''} 的 ${count} 个资产文件`;
+      setTimeout(() => { statusEl.classList.add('hidden'); }, 5000);
+    }
+    await loadReleases();
+  } catch (err) {
+    if (statusEl) {
+      statusEl.className = 'text-xs text-rose-400 mt-2 mono';
+      statusEl.textContent = `GitHub 同步失败: ${err.message}`;
+    }
+    alert('从 GitHub 同步失败: ' + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '↻ 从 GitHub 同步最新 Release';
+    }
+  }
+};
+
+window.handleReleaseFilesSelected = async function(files) {
+  if (!files || files.length === 0) return;
+  const statusEl = document.getElementById('upload-status');
+  if (statusEl) {
+    statusEl.classList.remove('hidden');
+    statusEl.className = 'text-xs text-sky-400 mt-2 mono';
+    statusEl.textContent = `正在上传 ${files.length} 个文件...`;
+  }
+
+  const formData = new FormData();
+  for (let i = 0; i < files.length; i++) {
+    formData.append('files', files[i]);
+  }
+
+  try {
+    const res = await requestWithAuth(getApiUrl('api/v1/upgrade/upload'), {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    const data = await res.json();
+    const saved = data.saved_files ? data.saved_files.length : 0;
+    if (statusEl) {
+      statusEl.className = 'text-xs text-emerald-400 mt-2 mono';
+      statusEl.textContent = `上传成功! 已成功保存 ${saved} 个文件`;
+      setTimeout(() => { statusEl.classList.add('hidden'); }, 4000);
+    }
+    await loadReleases();
+  } catch (err) {
+    if (statusEl) {
+      statusEl.className = 'text-xs text-rose-400 mt-2 mono';
+      statusEl.textContent = `文件上传失败: ${err.message}`;
+    }
+    alert('上传失败: ' + err.message);
+  } finally {
+    const fileInput = document.getElementById('releases-file-input');
+    if (fileInput) fileInput.value = '';
+  }
+};
+
+// 8. 全局看板数据拉取与刷新
 async function refreshDashboard(forceRedraw = false) {
   try {
     const overviewPromise = fetch(getApiUrl('api/v1/overview'));
@@ -1477,6 +1666,32 @@ document.addEventListener('DOMContentLoaded', async () => {
         btnRefresh.disabled = false;
       }
     });
+  }
+
+  // 发布包拖拽上传区域事件绑定
+  const dropzone = document.getElementById('releases-dropzone');
+  if (dropzone) {
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('border-sky-400', 'bg-sky-950/40');
+      }, false);
+    });
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('border-sky-400', 'bg-sky-950/40');
+      }, false);
+    });
+    dropzone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      const files = dt ? dt.files : null;
+      if (files && files.length > 0) {
+        window.handleReleaseFilesSelected(files);
+      }
+    }, false);
   }
 
   // 节点下拉选择变更

@@ -21,6 +21,7 @@
         </div>
         <div class="flex items-center gap-2 text-xs">
           <button id="btn-toggle-aliases" onclick="toggleAliasModal(true)" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="管理配额、模型与账号的别名映射">🏷️ 别名映射</button>
+          <button id="btn-toggle-releases" onclick="toggleReleasesModal(true)" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="管理分发包与一键从 GitHub 同步">📦 版本管理</button>
           <button onclick="switchMainTab('tab-debug')" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">🔍 调试原始上报 (5)</button>
           <button id="btn-manual-refresh" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">↻ 立即刷新</button>
           <button id="btn-set-api-key" onclick="promptApiKey()" class="px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="设置或查看服务端 API Key 认证密钥">🔑 密钥</button>
@@ -263,6 +264,50 @@
     </div>
   </div>
 
-  <script src="app.js?v=0.2.0"></script>
+  <!-- 8. 版本分发与发布包管理弹窗 (全屏居中浮层) -->
+  <div id="releases-modal" class="modal-overlay hidden">
+    <div class="modal-content max-w-4xl">
+      <div class="modal-header">
+        <div>
+          <h2 class="text-base font-bold text-white flex items-center gap-2">📦 版本发布与分发包管理</h2>
+          <p class="text-xs text-slate-400 mt-1">管理服务端托管的跨平台发布包（各节点客户端执行 statusline upgrade 时优先直连本地下载）</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-sync-github" onclick="syncReleasesFromGitHub()" class="btn-action bg-sky-950/40 text-sky-300 border-sky-800/80 hover:bg-sky-900/60" title="服务端自动从 GitHub Releases 下载最新安装包并缓存至本地">↻ 从 GitHub 同步最新 Release</button>
+          <button id="btn-close-releases" onclick="toggleReleasesModal(false)" class="btn-action">关闭</button>
+        </div>
+      </div>
+      <div class="modal-body space-y-4">
+        <!-- 拖拽上传区域 -->
+        <div id="releases-dropzone" class="border-2 border-dashed border-slate-700/80 hover:border-sky-500/80 rounded-xl p-5 text-center transition bg-slate-900/40">
+          <div class="text-2xl mb-1">📤</div>
+          <p class="text-xs text-slate-300">拖拽 <span class="mono text-sky-400">statusline_*.tar.gz</span>、<span class="mono text-sky-400">.zip</span> 或 <span class="mono text-sky-400">checksums.txt</span> 到此处上传</p>
+          <p class="text-[11px] text-slate-500 mt-1">或 <label class="cursor-pointer text-sky-400 hover:underline">点击选择本地文件<input type="file" id="releases-file-input" multiple class="hidden" onchange="handleReleaseFilesSelected(this.files)"></label></p>
+          <div id="upload-status" class="text-xs text-amber-400 mt-2 hidden mono"></div>
+        </div>
+
+        <!-- 托管包列表 -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400">
+                <th class="py-2.5 px-3">文件名</th>
+                <th class="py-2.5 px-3" style="width: 100px;">版本</th>
+                <th class="py-2.5 px-3" style="width: 140px;">平台 (OS/Arch)</th>
+                <th class="py-2.5 px-3" style="width: 100px;">大小</th>
+                <th class="py-2.5 px-3" style="width: 120px;">SHA256 校验</th>
+                <th class="py-2.5 px-3 text-right" style="width: 80px;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="releases-tbody" class="divide-y divide-slate-800/60 mono">
+              <tr><td colspan="6" class="py-4 text-center text-slate-500">加载分发包列表中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=0.3.0"></script>
 </body>
 </html>
