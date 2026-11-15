@@ -114,11 +114,19 @@ func TestHandlersReportAndQuery(t *testing.T) {
 	if len(aliases.Quotas) == 0 {
 		t.Errorf("expected default quota aliases, got 0")
 	}
+	if len(aliases.Priorities) != 7 {
+		t.Errorf("expected 7 default priorities, got %d", len(aliases.Priorities))
+	}
+	if len(aliases.Priorities) > 0 && aliases.Priorities[0].Key != "model" {
+		t.Errorf("expected #1 priority to be model, got %s", aliases.Priorities[0].Key)
+	}
 
 	// 9. Test POST /api/v1/config/aliases
 	postPayload := `[
 		{"category":"quota","key":"test-key","name":"Test Model","short_name":"TM"},
-		{"category":"account","key":"vip@example.com","name":"VIP User","short_name":"VIP","sort_order":1}
+		{"category":"account","key":"vip@example.com","name":"VIP User","short_name":"VIP","sort_order":1},
+		{"category":"priority","key":"dir","name":"工作区目录","short_name":"P1","sort_order":1},
+		{"category":"priority","key":"model","name":"模型标识与推理深度","short_name":"P7","sort_order":7}
 	]`
 	reqPostAliases := httptest.NewRequest(http.MethodPost, "/api/v1/config/aliases", bytes.NewBufferString(postPayload))
 	reqPostAliases.Header.Set("Content-Type", "application/json")
@@ -147,6 +155,15 @@ func TestHandlersReportAndQuery(t *testing.T) {
 	}
 	if !foundVip {
 		t.Errorf("expected vip@example.com in aliasesAfter accounts")
+	}
+	if len(aliasesAfter.Priorities) != 7 {
+		t.Fatalf("expected 7 priorities in aliasesAfter, got %d", len(aliasesAfter.Priorities))
+	}
+	if aliasesAfter.Priorities[0].Key != "dir" {
+		t.Errorf("expected updated #1 priority to be dir, got %s", aliasesAfter.Priorities[0].Key)
+	}
+	if aliasesAfter.Priorities[6].Key != "model" {
+		t.Errorf("expected updated #7 priority to be model, got %s", aliasesAfter.Priorities[6].Key)
 	}
 	var debugReports []map[string]interface{}
 	if err := json.Unmarshal(wDebug.Body.Bytes(), &debugReports); err != nil {

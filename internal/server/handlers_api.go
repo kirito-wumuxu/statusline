@@ -263,6 +263,11 @@ func (s *Server) handleGetAliases(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to get aliases"}`, http.StatusInternalServerError)
 		return
 	}
+	if len(aliases.Priorities) == 0 {
+		defaults := model.DefaultPriorityAliases()
+		_ = s.store.SaveDisplayAliases(defaults)
+		aliases.Priorities = defaults
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(aliases)
 }
@@ -299,6 +304,10 @@ func (s *Server) handleSaveAliases(w http.ResponseWriter, r *http.Request) {
 				for _, a := range grp.Accounts {
 					a.Category = "account"
 					items = append(items, a)
+				}
+				for _, p := range grp.Priorities {
+					p.Category = "priority"
+					items = append(items, p)
 				}
 			} else {
 				http.Error(w, `{"error":"invalid json format"}`, http.StatusBadRequest)
