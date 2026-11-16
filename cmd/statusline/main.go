@@ -147,6 +147,9 @@ func runSyncCommand(args []string, out io.Writer) error {
 		if resp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			if resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("服务端同步接口不可用 (HTTP 404: %s)\n提示: 远端服务尚未启用批量同步接口，请在服务器上更新并重启 statusline-server 服务", syncEndpoint)
+			}
 			return fmt.Errorf("服务端返回异常 (HTTP %d): %s", resp.StatusCode, string(respBody))
 		}
 
