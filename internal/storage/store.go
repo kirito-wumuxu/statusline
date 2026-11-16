@@ -98,14 +98,16 @@ type QuotaRecord struct {
 }
 
 type OverviewData struct {
-	ActiveNodes       int           `json:"active_nodes"`
-	ActiveSessions    int           `json:"active_sessions"`
-	TotalInputTokens  int64         `json:"total_input_tokens"`
-	TotalOutputTokens int64         `json:"total_output_tokens"`
-	TotalTokens       int64         `json:"total_tokens"`
-	TotalCostUSD      float64       `json:"total_cost_usd"`
-	TodayEventsCount  int64         `json:"today_events_count"`
-	LatestQuotas      []QuotaRecord `json:"latest_quotas"`
+	ActiveNodes              int           `json:"active_nodes"`
+	ActiveSessions           int           `json:"active_sessions"`
+	TotalInputTokens         int64         `json:"total_input_tokens"`
+	TotalOutputTokens        int64         `json:"total_output_tokens"`
+	TotalCacheReadTokens     int64         `json:"total_cache_read_tokens"`
+	TotalCacheCreationTokens int64         `json:"total_cache_creation_tokens"`
+	TotalTokens              int64         `json:"total_tokens"`
+	TotalCostUSD             float64       `json:"total_cost_usd"`
+	TodayEventsCount         int64         `json:"today_events_count"`
+	LatestQuotas             []QuotaRecord `json:"latest_quotas"`
 }
 
 func NewStore(dbPath string) (*Store, error) {
@@ -173,6 +175,25 @@ func (s *Store) Ingest(env *model.TelemetryEnvelope) error {
 		sessionID = fmt.Sprintf("sess_%s_%s", nodeID, norm.ProductType)
 	}
 
+	// Auto-compute turn delta if current turn tokens were not explicitly provided
+	curIn := norm.CurrentInputTokens
+	curOut := norm.CurrentOutputTokens
+	if curIn == 0 && curOut == 0 && (norm.TotalInputTokens > 0 || norm.TotalOutputTokens > 0) {
+		var prevIn, prevOut int64
+		row := tx.QueryRow("SELECT COALESCE(total_input_tokens, 0), COALESCE(total_output_tokens, 0) FROM sessions WHERE session_id = ?", sessionID)
+		if err := row.Scan(&prevIn, &prevOut); err == nil {
+			if norm.TotalInputTokens > prevIn {
+				curIn = norm.TotalInputTokens - prevIn
+			}
+			if norm.TotalOutputTokens > prevOut {
+				curOut = norm.TotalOutputTokens - prevOut
+			}
+		} else {
+			curIn = norm.TotalInputTokens
+			curOut = norm.TotalOutputTokens
+		}
+	}
+
 	upsertSessionSQL := `
 	INSERT INTO sessions (
 		session_id, node_id, product_type, conversation_id, session_name,
@@ -231,7 +252,7 @@ func (s *Store) Ingest(env *model.TelemetryEnvelope) error {
 		nodeID, sessionID, norm.PromptID, norm.ProductType, nowStr,
 		norm.ModelID, norm.ModelDisplayName, norm.ModelEffort, norm.AgentState,
 		norm.ContextWindowSize, norm.TotalInputTokens, norm.TotalOutputTokens,
-		norm.CurrentInputTokens, norm.CurrentOutputTokens, norm.CacheCreationTokens, norm.CacheReadTokens,
+		curIn, curOut, norm.CacheCreationTokens, norm.CacheReadTokens,
 		norm.UsedPercentage, norm.RemainingPct, exceedsInt,
 		norm.TotalCostUSD, norm.TotalDurationMS, norm.TotalAPIDuration, norm.CacheHitRatio,
 		string(quotaJSON), "", string(rawPayloadJSON),
@@ -333,10 +354,19 @@ func (s *Store) GetOverview() (*OverviewData, error) {
 	ov := &OverviewData{}
 
 	_ = s.db.QueryRow("SELECT COUNT(*) FROM nodes").Scan(&ov.ActiveNodes)
-	_ = s.db.QueryRow("SELECT COUNT(*), COALESCE(SUM(total_input_tokens), 0), COALESCE(SUM(total_output_tokens), 0), COALESCE(SUM(total_cost_usd), 0) FROM sessions").
-		Scan(&ov.ActiveSessions, &ov.TotalInputTokens, &ov.TotalOutputTokens, &ov.TotalCostUSD)
+	_ = s.db.QueryRow("SELECT COUNT(*), COALESCE(SUM(total_cost_usd), 0) FROM sessions").
+		Scan(&ov.ActiveSessions, &ov.TotalCostUSD)
 
-	ov.TotalTokens = ov.TotalInputTokens + ov.TotalOutputTokens
+	_ = s.db.QueryRow(`
+		SELECT 
+			COALESCE(SUM(current_input_tokens), 0),
+			COALESCE(SUM(current_output_tokens), 0),
+			COALESCE(SUM(cache_read_tokens), 0),
+			COALESCE(SUM(cache_creation_tokens), 0),
+			COALESCE(SUM(current_input_tokens + current_output_tokens + cache_read_tokens + cache_creation_tokens), 0)
+		FROM telemetry_events
+	`).Scan(&ov.TotalInputTokens, &ov.TotalOutputTokens, &ov.TotalCacheReadTokens, &ov.TotalCacheCreationTokens, &ov.TotalTokens)
+
 	_ = s.db.QueryRow("SELECT COUNT(*) FROM telemetry_events WHERE date(reported_at) = date('now')").Scan(&ov.TodayEventsCount)
 
 	quotas, err := s.GetAccountQuotas()
@@ -456,23 +486,26 @@ func (s *Store) GetRecentMetrics(limit int) ([]MetricPoint, error) {
 
 // DailyModelToken records the consumption of a single model on a specific day.
 type DailyModelToken struct {
-	ModelID      string  `json:"model_id"`
-	DisplayName  string  `json:"display_name"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	Percentage   float64 `json:"percentage"`
-	CostUSD      float64 `json:"cost_usd,omitempty"`
+	ModelID             string  `json:"model_id"`
+	DisplayName         string  `json:"display_name"`
+	InputTokens         int64   `json:"input_tokens"`
+	OutputTokens        int64   `json:"output_tokens"`
+	CacheReadTokens     int64   `json:"cache_read_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	Percentage          float64 `json:"percentage"`
+	CostUSD             float64 `json:"cost_usd,omitempty"`
 }
 
 // DailyTokensSummary aggregates model token consumption for a single day.
 type DailyTokensSummary struct {
-	Date              string            `json:"date"`
-	TotalInputTokens  int64             `json:"total_input_tokens"`
-	TotalOutputTokens int64             `json:"total_output_tokens"`
-	TotalTokens       int64             `json:"total_tokens"`
-	TotalCostUSD      float64           `json:"total_cost_usd,omitempty"`
-	Models            []DailyModelToken `json:"models"`
+	Date                 string            `json:"date"`
+	TotalInputTokens     int64             `json:"total_input_tokens"`
+	TotalOutputTokens    int64             `json:"total_output_tokens"`
+	TotalCacheReadTokens int64             `json:"total_cache_read_tokens"`
+	TotalTokens          int64             `json:"total_tokens"`
+	TotalCostUSD         float64           `json:"total_cost_usd,omitempty"`
+	Models               []DailyModelToken `json:"models"`
 }
 
 // GetDailyModelTokens returns daily token consumption grouped by date and model.
@@ -482,60 +515,23 @@ func (s *Store) GetDailyModelTokens(days int) ([]DailyTokensSummary, error) {
 	}
 
 	query := `
-	WITH event_deltas AS (
-		SELECT 
-			e.id,
-			e.session_id,
-			e.model_id,
-			COALESCE(e.model_display_name, e.model_id) AS display_name,
-			strftime('%Y-%m-%d', e.reported_at) AS day,
-			e.reported_at,
-			COALESCE(e.current_output_tokens, 0) AS cur_out,
-			COALESCE(e.total_output_tokens, 0) AS tot_out,
-			LAG(COALESCE(e.total_output_tokens, 0)) OVER (PARTITION BY e.session_id ORDER BY e.reported_at ASC, e.id ASC) AS prev_out,
-			COALESCE(e.current_input_tokens, 0) AS cur_in,
-			COALESCE(e.total_input_tokens, 0) AS tot_in,
-			LAG(COALESCE(e.total_input_tokens, 0)) OVER (PARTITION BY e.session_id ORDER BY e.reported_at ASC, e.id ASC) AS prev_in
-		FROM telemetry_events e
-	)
 	SELECT 
-		day,
+		strftime('%Y-%m-%d', reported_at) AS day,
 		model_id,
-		MAX(display_name) AS display_name,
-		COALESCE(SUM(CASE 
-			WHEN cur_in > 0 THEN cur_in
-			WHEN prev_in IS NULL THEN tot_in 
-			WHEN tot_in > prev_in THEN tot_in - prev_in 
-			ELSE 0 
-		END), 0) AS in_tokens,
-		COALESCE(SUM(CASE 
-			WHEN cur_out > 0 THEN cur_out
-			WHEN prev_out IS NULL THEN tot_out 
-			WHEN tot_out > prev_out THEN tot_out - prev_out 
-			ELSE 0 
-		END), 0) AS out_tokens,
-		COALESCE(SUM(
-			(CASE 
-				WHEN cur_in > 0 THEN cur_in
-				WHEN prev_in IS NULL THEN tot_in 
-				WHEN tot_in > prev_in THEN tot_in - prev_in 
-				ELSE 0 
-			END) + 
-			(CASE 
-				WHEN cur_out > 0 THEN cur_out
-				WHEN prev_out IS NULL THEN tot_out 
-				WHEN tot_out > prev_out THEN tot_out - prev_out 
-				ELSE 0 
-			END)
-		), 0) AS total_tokens
-	FROM event_deltas
+		COALESCE(MAX(model_display_name), model_id) AS display_name,
+		COALESCE(SUM(current_input_tokens), 0) AS in_tokens,
+		COALESCE(SUM(current_output_tokens), 0) AS out_tokens,
+		COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+		COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+		COALESCE(SUM(current_input_tokens + current_output_tokens + cache_read_tokens + cache_creation_tokens), 0) AS total_tokens
+	FROM telemetry_events
 	WHERE reported_at >= datetime('now', '-' || ? || ' days')
 	GROUP BY day, model_id
 	ORDER BY day DESC, total_tokens DESC;`
 
 	rows, err := s.db.Query(query, days)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query daily model tokens: %w", err)
 	}
 	defer rows.Close()
 
@@ -543,41 +539,43 @@ func (s *Store) GetDailyModelTokens(days int) ([]DailyTokensSummary, error) {
 	var dayOrder []string
 
 	for rows.Next() {
-		var day, modelID, displayName string
-		var inTokens, outTokens, totalTokens int64
-
-		if err := rows.Scan(&day, &modelID, &displayName, &inTokens, &outTokens, &totalTokens); err != nil {
-			return nil, err
+		var day, modelID, dispName string
+		var inTokens, outTokens, cacheRead, cacheCreate, totalTokens int64
+		if err := rows.Scan(&day, &modelID, &dispName, &inTokens, &outTokens, &cacheRead, &cacheCreate, &totalTokens); err != nil {
+			return nil, fmt.Errorf("failed to scan daily model token row: %w", err)
 		}
 
-		summary, exists := dayMap[day]
+		sum, exists := dayMap[day]
 		if !exists {
-			summary = &DailyTokensSummary{
+			sum = &DailyTokensSummary{
 				Date:   day,
 				Models: []DailyModelToken{},
 			}
-			dayMap[day] = summary
+			dayMap[day] = sum
 			dayOrder = append(dayOrder, day)
 		}
 
-		summary.TotalInputTokens += inTokens
-		summary.TotalOutputTokens += outTokens
-		summary.TotalTokens += totalTokens
+		sum.TotalInputTokens += inTokens
+		sum.TotalOutputTokens += outTokens
+		sum.TotalCacheReadTokens += cacheRead
+		sum.TotalTokens += totalTokens
 
-		summary.Models = append(summary.Models, DailyModelToken{
-			ModelID:      modelID,
-			DisplayName:  displayName,
-			InputTokens:  inTokens,
-			OutputTokens: outTokens,
-			TotalTokens:  totalTokens,
+		sum.Models = append(sum.Models, DailyModelToken{
+			ModelID:             modelID,
+			DisplayName:         dispName,
+			InputTokens:         inTokens,
+			OutputTokens:        outTokens,
+			CacheReadTokens:     cacheRead,
+			CacheCreationTokens: cacheCreate,
+			TotalTokens:         totalTokens,
 		})
 	}
 
 	var result []DailyTokensSummary
 	for _, day := range dayOrder {
 		sum := dayMap[day]
-		for i := range sum.Models {
-			if sum.TotalTokens > 0 {
+		if sum.TotalTokens > 0 {
+			for i := range sum.Models {
 				sum.Models[i].Percentage = math.Round(float64(sum.Models[i].TotalTokens)/float64(sum.TotalTokens)*1000) / 10
 			}
 		}

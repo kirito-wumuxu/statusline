@@ -574,3 +574,63 @@ func TestPriorityAliasesStorage(t *testing.T) {
 	}
 }
 
+
+func TestDailyModelTokensAtomicAggregation(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_atomic.db")
+	s, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	sessID := "atomic-sess-1"
+	e1 := &model.TelemetryEnvelope{
+		ReportedAt: "2026-11-16T10:00:00Z",
+		Payload:    map[string]interface{}{},
+		Normalized: model.NormalizedData{
+			ProductType:         "antigravity",
+			SessionID:           sessID,
+			ModelID:             "gemini-3.8-flash-high",
+			ModelDisplayName:    "Gemini 3.8 Flash (High)",
+			CurrentInputTokens:  4000,
+			CurrentOutputTokens: 100,
+			CacheReadTokens:     60000,
+		},
+	}
+	e2 := &model.TelemetryEnvelope{
+		ReportedAt: "2026-11-16T10:05:00Z",
+		Payload:    map[string]interface{}{},
+		Normalized: model.NormalizedData{
+			ProductType:         "antigravity",
+			SessionID:           sessID,
+			ModelID:             "claude-opus-4-6",
+			ModelDisplayName:    "Claude Opus 4.6",
+			CurrentInputTokens:  2000,
+			CurrentOutputTokens: 50,
+			CacheReadTokens:     15000,
+		},
+	}
+	if err := s.Ingest(e1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ingest(e2); err != nil {
+		t.Fatal(err)
+	}
+
+	summaries, err := s.GetDailyModelTokens(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+	sum := summaries[0]
+	// 4000 + 100 + 60000 + 2000 + 50 + 15000 = 81150
+	expectedTotal := int64(81150)
+	if sum.TotalTokens != expectedTotal {
+		t.Fatalf("expected total tokens %d, got %d", expectedTotal, sum.TotalTokens)
+	}
+	if sum.TotalCacheReadTokens != 75000 {
+		t.Fatalf("expected cache read tokens 75000, got %d", sum.TotalCacheReadTokens)
+	}
+}
