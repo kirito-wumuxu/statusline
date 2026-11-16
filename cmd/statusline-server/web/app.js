@@ -1945,11 +1945,17 @@ window.triggerTranscriptSync = async function() {
   if (icon) icon.classList.add('animate-spin');
 
   try {
-    const res = await fetch('/api/v1/sync/transcripts', { method: 'POST' });
+    const res = await requestWithAuth(getApiUrl('api/v1/sync/transcripts'), { method: 'POST' });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error(`响应非有效 JSON: ${text.slice(0, 100) || '(空响应)'}`);
+    }
     alert(`转录同步完成：扫描 ${data.scanned_files} 个转录文件，新增 ${data.new_events} 条交互记录 (${data.elapsed_ms}ms)`);
     await refreshDashboard(true);
   } catch (err) {

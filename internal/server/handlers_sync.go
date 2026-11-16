@@ -12,6 +12,11 @@ func (s *Server) handleSyncTranscripts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.checkAPIKey(r) {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
