@@ -39,14 +39,29 @@ type Source interface {
 }
 
 // ResolveSource selects the best available update source:
-// If forcedSource is "server" or "github", it honors that choice.
-// If forcedSource is "auto" (default), it tests the configured statusline-server.
-// If statusline-server is reachable and reports upgrade_supported=true, ServerSource is returned;
-// otherwise it falls back to GitHubSource.
+// If forcedSource is "local", "server", or "github", it honors that choice.
+// If forcedSource is "auto" (default):
+// 1. Tests the configured statusline-server if reachable and reports upgrade_supported=true;
+// 2. Tests local releases directory if present and contains release packages;
+// 3. Falls back to official GitHub Releases.
 func ResolveSource(cfg *config.Config, forcedSource string) (Source, error) {
 	forced := strings.ToLower(strings.TrimSpace(forcedSource))
 	if forced == "github" {
 		return NewGitHubSource("kirito-wumuxu", "statusline"), nil
+	}
+
+	localDirs := getLocalReleasesCandidates()
+	if forced == "local" {
+		for _, d := range localDirs {
+			src := NewLocalSource(d)
+			if rel, err := src.CheckRelease(context.Background(), "latest"); err == nil && len(rel.Assets) > 0 {
+				return src, nil
+			}
+		}
+		if len(localDirs) > 0 {
+			return nil, fmt.Errorf("cannot use local update source: no release packages in %s", localDirs[0])
+		}
+		return nil, fmt.Errorf("cannot use local update source: releases directory not found")
 	}
 
 	serverEndpoint := ""
@@ -65,7 +80,8 @@ func ResolveSource(cfg *config.Config, forcedSource string) (Source, error) {
 		return NewServerSource(serverBase, apiKey), nil
 	}
 
-	// Auto mode: probe server if configured and not disabled
+	// Auto mode:
+	// 1. Probe server if configured and not disabled
 	if serverBase != "" && serverBase != "off" && serverBase != "none" {
 		serverSrc := NewServerSource(serverBase, apiKey)
 		probeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -77,8 +93,43 @@ func ResolveSource(cfg *config.Config, forcedSource string) (Source, error) {
 		}
 	}
 
-	// Fallback to GitHub Releases
+	// 2. Probe local releases directory (ideal for statusline-server offline or standalone upgrade)
+	for _, d := range localDirs {
+		src := NewLocalSource(d)
+		if rel, err := src.CheckRelease(context.Background(), "latest"); err == nil && len(rel.Assets) > 0 {
+			return src, nil
+		}
+	}
+
+	// 3. Fallback to GitHub Releases
 	return NewGitHubSource("kirito-wumuxu", "statusline"), nil
+}
+
+func getLocalReleasesCandidates() []string {
+	var candidates []string
+	if envDir := os.Getenv("STATUSLINE_RELEASES_DIR"); envDir != "" {
+		candidates = append(candidates, envDir)
+	}
+	if serverCfg, err := config.LoadServerConfig(""); err == nil && serverCfg != nil && serverCfg.Storage.ReleasesDir != "" {
+		dir := serverCfg.Storage.ReleasesDir
+		if strings.HasPrefix(dir, "~/") || dir == "~" {
+			if homeDir, _ := os.UserHomeDir(); homeDir != "" {
+				dir = filepath.Join(homeDir, dir[1:])
+			}
+		}
+		candidates = append(candidates, filepath.Clean(dir))
+	}
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" {
+		candidates = append(candidates, filepath.Join(homeDir, ".local", "share", "statusline", "releases"))
+	}
+	if execPath, err := GetExecutablePath(); err == nil && execPath != "" {
+		execDir := filepath.Dir(execPath)
+		candidates = append(candidates, filepath.Join(execDir, "releases"))
+		candidates = append(candidates, filepath.Join(execDir, "dist"))
+	}
+	candidates = append(candidates, "dist")
+	return candidates
 }
 
 func extractServerBaseURL(endpoint string) string {

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -163,5 +164,104 @@ func TestEndToEndUpgradePipeline(t *testing.T) {
 	}
 	if !bytes.Contains(outCheck.Bytes(), []byte("-check 模式")) {
 		t.Errorf("expected check mode notice, got %s", outCheck.String())
+	}
+}
+
+func TestServerSelfUpgradePipeline(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	platform := runtime.GOOS + "_" + runtime.GOARCH
+	var archiveName string
+	var archiveBuf bytes.Buffer
+
+	newServerBinaryContent := []byte("#!/bin/sh\necho 'server v0.3.0'\n")
+	newClientBinaryContent := []byte("#!/bin/sh\necho 'client v0.3.0'\n")
+
+	archiveName = fmt.Sprintf("statusline_v0.3.0_%s.tar.gz", platform)
+	gw := gzip.NewWriter(&archiveBuf)
+	tw := tar.NewWriter(gw)
+
+	// Add statusline-server into archive
+	hServer := &tar.Header{
+		Name: "statusline_v0.3.0_" + platform + "/statusline-server",
+		Mode: 0755,
+		Size: int64(len(newServerBinaryContent)),
+	}
+	_ = tw.WriteHeader(hServer)
+	_, _ = tw.Write(newServerBinaryContent)
+
+	// Add statusline into archive
+	hClient := &tar.Header{
+		Name: "statusline_v0.3.0_" + platform + "/statusline",
+		Mode: 0755,
+		Size: int64(len(newClientBinaryContent)),
+	}
+	_ = tw.WriteHeader(hClient)
+	_, _ = tw.Write(newClientBinaryContent)
+
+	tw.Close()
+	gw.Close()
+
+	archiveBytes := archiveBuf.Bytes()
+	releasesDir := filepath.Join(tmpDir, "local_releases")
+	_ = os.MkdirAll(releasesDir, 0755)
+	_ = os.WriteFile(filepath.Join(releasesDir, archiveName), archiveBytes, 0644)
+
+	// Setup fake server running binary
+	serverBinDir := filepath.Join(tmpDir, "server_bin")
+	_ = os.MkdirAll(serverBinDir, 0755)
+	targetServerExecutable := filepath.Join(serverBinDir, "statusline-server")
+	targetClientExecutable := filepath.Join(serverBinDir, "statusline")
+	oldServerContent := []byte("#!/bin/sh\necho 'server v0.2.0'\n")
+	oldClientContent := []byte("#!/bin/sh\necho 'client v0.2.0'\n")
+	_ = os.WriteFile(targetServerExecutable, oldServerContent, 0755)
+	_ = os.WriteFile(targetClientExecutable, oldClientContent, 0755)
+
+	// Test ExecuteUpgrade on statusline-server with local source and -all
+	var outBuf bytes.Buffer
+	opts := updater.UpgradeOptions{
+		TargetTag:        "v0.3.0",
+		ForcedSource:     "local",
+		UpgradeAll:       true,
+		Yes:              true,
+		CurrentVer:       "v0.2.0",
+		TargetExecutable: targetServerExecutable,
+	}
+
+	// Point local source to releasesDir
+	os.Setenv("STATUSLINE_RELEASES_DIR", releasesDir)
+	defer os.Unsetenv("STATUSLINE_RELEASES_DIR")
+
+	localSrc := updater.NewLocalSource(releasesDir)
+	rel, err := localSrc.CheckRelease(context.Background(), "latest")
+	if err != nil {
+		t.Fatalf("LocalSource CheckRelease failed: %v", err)
+	}
+	if rel.Version != "v0.3.0" {
+		t.Fatalf("expected version v0.3.0, got %s", rel.Version)
+	}
+
+	err = updater.ExecuteUpgrade(opts, &outBuf)
+	if err != nil {
+		t.Fatalf("Server ExecuteUpgrade failed: %v\nOutput: %s", err, outBuf.String())
+	}
+
+	// Verify statusline-server replaced
+	upServer, _ := os.ReadFile(targetServerExecutable)
+	if !bytes.Equal(upServer, newServerBinaryContent) {
+		t.Errorf("statusline-server content mismatch, expected %q, got %q", string(newServerBinaryContent), string(upServer))
+	}
+
+	// Verify statusline client also replaced (because of -all)
+	upClient, _ := os.ReadFile(targetClientExecutable)
+	if !bytes.Equal(upClient, newClientBinaryContent) {
+		t.Errorf("statusline client content mismatch, expected %q, got %q", string(newClientBinaryContent), string(upClient))
+	}
+
+	if !bytes.Contains(outBuf.Bytes(), []byte("statusline-server 已成功替换为 v0.3.0")) {
+		t.Errorf("expected server replacement output, got: %s", outBuf.String())
+	}
+	if !bytes.Contains(outBuf.Bytes(), []byte("statusline 已同时成功替换为 v0.3.0")) {
+		t.Errorf("expected client replacement output, got: %s", outBuf.String())
 	}
 }
