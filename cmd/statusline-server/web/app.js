@@ -903,6 +903,7 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
         date: d,
         totalIn: 0,
         totalOut: 0,
+        totalCache: 0,
         totalTokens: 0,
         models: []
       });
@@ -910,6 +911,7 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
     const grp = dateGroups.get(d);
     grp.totalIn += (r.total_input_tokens != null ? r.total_input_tokens : (r.input_tokens || 0));
     grp.totalOut += (r.total_output_tokens != null ? r.total_output_tokens : (r.output_tokens || 0));
+    grp.totalCache += (r.total_cache_read_tokens != null ? r.total_cache_read_tokens : (r.cache_read_tokens || 0));
     grp.totalTokens += (r.total_tokens || 0);
 
     if (r.models && Array.isArray(r.models)) {
@@ -935,6 +937,7 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
         <td class="py-3 px-4 text-slate-300">当天各模型总计</td>
         <td class="py-3 px-4 text-emerald-400">${formatTokens(grp.totalIn)}</td>
         <td class="py-3 px-4 text-rose-400">${formatTokens(grp.totalOut)}</td>
+        <td class="py-3 px-4 text-amber-300">${formatTokens(grp.totalCache)}</td>
         <td class="py-3 px-4 font-bold text-white">${formatTokens(grp.totalTokens)}</td>
         <td class="py-3 px-4">
           <div class="text-[11px] text-slate-400 mb-1">当天总占比 100%</div>
@@ -961,6 +964,7 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
           </td>
           <td class="py-2.5 px-4 text-slate-400">${formatTokens(m.input_tokens)}</td>
           <td class="py-2.5 px-4 text-slate-400">${formatTokens(m.output_tokens)}</td>
+          <td class="py-2.5 px-4 text-amber-300/90">${formatTokens(m.cache_read_tokens || 0)}</td>
           <td class="py-2.5 px-4 font-bold text-slate-200">${formatTokens(m.total_tokens)}</td>
           <td class="py-2.5 px-4">
             <div class="text-[11px] text-slate-400 mb-0.5">${pct}%</div>
@@ -1767,12 +1771,14 @@ async function refreshDashboard(forceRedraw = false) {
     let todayTokens = 0;
     let todayInput = 0;
     let todayOutput = 0;
+    let todayCache = 0;
     const todayStr = new Date().toISOString().slice(0, 10);
     if (dailyTokens && Array.isArray(dailyTokens)) {
       for (const row of dailyTokens) {
         if (row.date === todayStr) {
           todayInput += (row.total_input_tokens != null ? row.total_input_tokens : (row.input_tokens || 0));
           todayOutput += (row.total_output_tokens != null ? row.total_output_tokens : (row.output_tokens || 0));
+          todayCache += (row.total_cache_read_tokens != null ? row.total_cache_read_tokens : (row.cache_read_tokens || 0));
           todayTokens += (row.total_tokens || 0);
         }
       }
@@ -1780,13 +1786,14 @@ async function refreshDashboard(forceRedraw = false) {
 
     setText('val-tokens-today', formatTokens(todayTokens));
     setText('badge-tokens-count', formatTokens(todayTokens));
-    setHtml('val-tokens-today-detail', `↑${formatTokens(todayInput)}<br>↓${formatTokens(todayOutput)}`);
+    setHtml('val-tokens-today-detail', `↑${formatTokens(todayInput)} ↓${formatTokens(todayOutput)}<br>⚡${formatTokens(todayCache)}`);
 
     const totalTokens = overview.total_tokens || overview.tokens_total || 0;
     const totalInput = overview.total_input_tokens || 0;
     const totalOutput = overview.total_output_tokens || 0;
+    const totalCache = overview.total_cache_read_tokens || 0;
     setText('val-tokens-total', formatTokens(totalTokens));
-    setHtml('val-tokens-total-detail', `↑${formatTokens(totalInput)}<br>↓${formatTokens(totalOutput)}`);
+    setHtml('val-tokens-total-detail', `↑${formatTokens(totalInput)} ↓${formatTokens(totalOutput)}<br>⚡${formatTokens(totalCache)}`);
 
     setText('val-nodes', overview.active_nodes || 0);
 
@@ -1928,3 +1935,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 });
+
+
+// 手动触发本地转录同步
+window.triggerTranscriptSync = async function() {
+  const btn = document.getElementById('btn-sync-transcripts');
+  const icon = document.getElementById('sync-icon');
+  if (btn) btn.disabled = true;
+  if (icon) icon.classList.add('animate-spin');
+
+  try {
+    const res = await fetch('/api/v1/sync/transcripts', { method: 'POST' });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    alert(`转录同步完成：扫描 ${data.scanned_files} 个转录文件，新增 ${data.new_events} 条交互记录 (${data.elapsed_ms}ms)`);
+    await refreshDashboard(true);
+  } catch (err) {
+    console.error('Transcript sync failed:', err);
+    alert(`转录同步失败: ${err.message}`);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (icon) icon.classList.remove('animate-spin');
+  }
+};

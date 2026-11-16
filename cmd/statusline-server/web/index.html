@@ -162,6 +162,9 @@
             <p class="text-xs text-slate-400 mt-0.5">按日期汇总各模型输入 / 输出 Token 吞吐与占比明细</p>
           </div>
           <div class="flex items-center gap-3">
+            <button id="btn-sync-transcripts" onclick="triggerTranscriptSync()" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white flex items-center gap-1.5 transition shadow-sm cursor-pointer" title="扫描并同步本地历史转录日志中的 Token">
+              <span id="sync-icon">🔄</span> 同步本地转录
+            </button>
             <span class="px-3 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 border border-slate-700 mono">📅 近 14 天聚合</span>
             <label class="text-xs text-slate-300 bg-slate-800/90 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2 cursor-pointer select-none">
               <input type="checkbox" id="toggle-zero" onchange="toggleZeroRows()" checked class="rounded bg-slate-900 border-slate-600 text-sky-500">
@@ -178,13 +181,14 @@
                 <th class="py-3 px-4" style="width: 220px;">模型名称</th>
                 <th class="py-3 px-4" style="width: 130px;">输入 Token (↑)</th>
                 <th class="py-3 px-4" style="width: 130px;">输出 Token (↓)</th>
+                <th class="py-3 px-4" style="width: 140px;">缓存命中 (⚡ Cache)</th>
                 <th class="py-3 px-4" style="width: 140px;">总计 Token</th>
                 <th class="py-3 px-4 w-64">消耗占比</th>
               </tr>
             </thead>
             <tbody id="daily-tokens-tbody" class="divide-y divide-slate-800/60 mono">
               <tr>
-                <td colspan="6" class="py-8 text-center text-slate-500">数据加载中...</td>
+                <td colspan="7" class="py-8 text-center text-slate-500">数据加载中...</td>
               </tr>
             </tbody>
           </table>
