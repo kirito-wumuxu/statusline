@@ -79,6 +79,12 @@ aliases:
   # 3. 账号实体映射（匹配登录账号，用于宽屏与窄屏缩写）
   accounts: []
 
+# 自动同步与升级设置（每天第一次被 AI CLI 调用时静默拉起后台检查与同步）
+auto_sync:
+  enabled: true                     # 设为 false 可完全停用每日自动后台同步
+  sync_aliases: true                # 自动从服务端同步显示别名与模块优先级
+  auto_upgrade: true                # 发现官方新版本发布时自动执行原地原子升级
+
 # 日志设置（客户端默认关闭，不影响终端状态栏输出）
 # 日志文件固定写入可执行文件所在目录的 statusline.log
 logging:

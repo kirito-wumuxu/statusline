@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"statusline/internal/autoupdate"
 	"statusline/internal/config"
 	"statusline/internal/installer"
 	"statusline/internal/logging"
@@ -36,12 +37,17 @@ func printHelp() {
 
 Usage:
   statusline                    Render statusline from stdin JSON (called by AI CLI)
+  statusline auto-update [opts] Sync display aliases & check auto-upgrade
   statusline sync [options]     Scan local transcripts and sync missing turns to server
   statusline init [options]     Auto-configure settings.json for Antigravity & Claude Code
   statusline upgrade [options]  Self-upgrade statusline to the latest release
   statusline update [options]   Alias for upgrade
   statusline --version, -v      Print version information
   statusline --help, -h         Show this help message
+
+Auto-Update Options:
+  -force                        Force sync & update even if already executed today
+  -check                        Check for updates without modifying files
 
 Sync Options:
   -home <path>                  Custom home directory to scan transcripts from
@@ -58,6 +64,17 @@ Init Options:
   -settings <path>              Specify custom path to settings.json
   -bin <path>                   Specify custom binary path (default: in-place binary location)
 `, Version)
+}
+
+func runAutoUpdateCommand(args []string, cfg *config.Config, out io.Writer) error {
+	fs := flag.NewFlagSet("auto-update", flag.ContinueOnError)
+	fs.SetOutput(out)
+	forceFlag := fs.Bool("force", false, "Force sync and update check even if already executed today")
+	checkFlag := fs.Bool("check", false, "Check for updates without modifying files")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return autoupdate.RunAutoUpdate(cfg, Version, *forceFlag, *checkFlag, out)
 }
 
 func runUpgradeCommand(args []string, out io.Writer) error {
@@ -293,6 +310,25 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "auto-update":
+			cfg, err := config.LoadConfig("")
+			if err != nil {
+				cfg = config.DefaultConfig()
+			}
+			var out io.Writer = os.Stdout
+			// If not running in terminal (e.g. background detached process), discard stdout
+			if fi, err := os.Stdout.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) == 0 {
+				out = nil
+			}
+			cleanup := logging.Setup(true, "info", "text", "statusline.log")
+			defer cleanup()
+			if err := runAutoUpdateCommand(os.Args[2:], cfg, out); err != nil {
+				if out != nil {
+					fmt.Fprintf(os.Stderr, "Error in auto-update: %v\n", err)
+				}
+				os.Exit(1)
+			}
+			return
 		case "--version", "-v", "-version", "version":
 			fmt.Printf("statusline version %s\n", Version)
 			return
@@ -316,4 +352,7 @@ func main() {
 	n := node.GetNodeInfo(cfg.Node.ID, Version)
 	slog.Debug("node info", "node_id", n.NodeID, "hostname", n.Hostname)
 	execute(os.Stdin, os.Stdout, cfg, n)
+
+	// Trigger daily background sync & upgrade check after render completes
+	autoupdate.TriggerDailySyncIfDue(cfg, Version)
 }

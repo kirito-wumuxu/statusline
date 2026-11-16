@@ -188,3 +188,23 @@ func TestRunSyncCommand(t *testing.T) {
 		t.Errorf("expected 1 inserted, got: %s", outStr)
 	}
 }
+
+func TestRunAutoUpdateCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFile := filepath.Join(tmpDir, ".daily_sync")
+	t.Setenv("STATUSLINE_STATE_FILE", stateFile)
+
+	cfg := config.DefaultClientConfig()
+	cfg.Report.Endpoint = "off"
+
+	var out bytes.Buffer
+	err := runAutoUpdateCommand([]string{"-check", "-force"}, cfg, &out)
+	if err != nil {
+		t.Fatalf("runAutoUpdateCommand failed: %v", err)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "[1/2]") || !strings.Contains(outStr, "[2/2]") {
+		t.Errorf("expected step output, got: %s", outStr)
+	}
+}

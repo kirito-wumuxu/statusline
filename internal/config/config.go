@@ -11,11 +11,19 @@ import (
 
 // ClientConfig holds configuration for the statusline client plugin.
 type ClientConfig struct {
-	Report  ReportConfig         `yaml:"report"`
-	Node    NodeConfig           `yaml:"node"`
-	Display DisplayConfig        `yaml:"display"`
-	Aliases DisplayAliasesConfig `yaml:"aliases"`
-	Logging LoggingConfig        `yaml:"logging"`
+	Report   ReportConfig         `yaml:"report"`
+	Node     NodeConfig           `yaml:"node"`
+	Display  DisplayConfig        `yaml:"display"`
+	Aliases  DisplayAliasesConfig `yaml:"aliases"`
+	AutoSync AutoSyncConfig       `yaml:"auto_sync"`
+	Logging  LoggingConfig        `yaml:"logging"`
+}
+
+// AutoSyncConfig controls automatic daily background synchronization and upgrades.
+type AutoSyncConfig struct {
+	Enabled     bool `yaml:"enabled"`      // Client default: true (triggered once per day)
+	SyncAliases bool `yaml:"sync_aliases"` // Client default: true (auto-sync display aliases & priorities)
+	AutoUpgrade bool `yaml:"auto_upgrade"` // Client default: true (auto-upgrade binary if newer release available)
 }
 
 // DisplayAliasesConfig defines name and short_name mappings for quotas, models, and accounts.
@@ -134,6 +142,11 @@ func DefaultClientConfig() *ClientConfig {
 			},
 			Accounts: []DisplayAliasItem{},
 		},
+		AutoSync: AutoSyncConfig{
+			Enabled:     true,
+			SyncAliases: true,
+			AutoUpgrade: true,
+		},
 		Logging: LoggingConfig{
 			Enabled: false,
 			Level:   "info",
@@ -174,6 +187,41 @@ func DefaultServerConfig() *ServerConfig {
 	return cfg
 }
 
+// FindClientConfigFile locates the active client.yaml configuration file path.
+// Priority:
+// 1. STATUSLINE_CLIENT_CONFIG / STATUSLINE_CONFIG environment variable
+// 2. client.yaml in the executable's directory
+// 3. client.yaml in the current working directory
+// 4. ~/.config/statusline/client.yaml
+func FindClientConfigFile() string {
+	homeDir, _ := os.UserHomeDir()
+	var candidates []string
+	if env := os.Getenv("STATUSLINE_CLIENT_CONFIG"); env != "" {
+		candidates = append(candidates, env)
+	}
+	if env := os.Getenv("STATUSLINE_CONFIG"); env != "" {
+		candidates = append(candidates, env)
+	}
+	if exeDir := getExeDir(); exeDir != "" {
+		candidates = append(candidates, filepath.Join(exeDir, "client.yaml"))
+	}
+	candidates = append(candidates, "client.yaml")
+	if homeDir != "" {
+		candidates = append(candidates, filepath.Join(homeDir, ".config", "statusline", "client.yaml"))
+	}
+
+	for _, c := range candidates {
+		expanded := expandHome(c)
+		if _, err := os.Stat(expanded); err == nil {
+			return expanded
+		}
+	}
+	if exeDir := getExeDir(); exeDir != "" {
+		return filepath.Join(exeDir, "client.yaml")
+	}
+	return "client.yaml"
+}
+
 // LoadClientConfig loads client settings from client.yaml.
 // Priority:
 // 1. Explicit path parameter
@@ -185,29 +233,7 @@ func LoadClientConfig(path string) (*ClientConfig, error) {
 	cfg := DefaultClientConfig()
 
 	if path == "" {
-		homeDir, _ := os.UserHomeDir()
-		var candidates []string
-		if env := os.Getenv("STATUSLINE_CLIENT_CONFIG"); env != "" {
-			candidates = append(candidates, env)
-		}
-		if env := os.Getenv("STATUSLINE_CONFIG"); env != "" {
-			candidates = append(candidates, env)
-		}
-		if exeDir := getExeDir(); exeDir != "" {
-			candidates = append(candidates, filepath.Join(exeDir, "client.yaml"))
-		}
-		candidates = append(candidates, "client.yaml")
-		if homeDir != "" {
-			candidates = append(candidates, filepath.Join(homeDir, ".config", "statusline", "client.yaml"))
-		}
-
-		for _, c := range candidates {
-			expanded := expandHome(c)
-			if _, err := os.Stat(expanded); err == nil {
-				path = expanded
-				break
-			}
-		}
+		path = FindClientConfigFile()
 	}
 
 	if path != "" {
@@ -332,6 +358,15 @@ func applyClientEnvOverrides(cfg *ClientConfig) {
 		if len(segs) > 0 {
 			cfg.Display.Segments = segs
 		}
+	}
+	if autoSync := os.Getenv("STATUSLINE_AUTO_SYNC"); autoSync != "" {
+		cfg.AutoSync.Enabled = strings.ToLower(autoSync) == "true" || autoSync == "1"
+	}
+	if autoUpgrade := os.Getenv("STATUSLINE_AUTO_UPGRADE"); autoUpgrade != "" {
+		cfg.AutoSync.AutoUpgrade = strings.ToLower(autoUpgrade) == "true" || autoUpgrade == "1"
+	}
+	if syncAliases := os.Getenv("STATUSLINE_SYNC_ALIASES"); syncAliases != "" {
+		cfg.AutoSync.SyncAliases = strings.ToLower(syncAliases) == "true" || syncAliases == "1"
 	}
 	applyLoggingEnvOverrides(&cfg.Logging)
 }

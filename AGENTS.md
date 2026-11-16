@@ -51,6 +51,7 @@
 ├── internal/
 │   ├── config/                     # 配置加载 (YAML + 环境变量覆盖)
 │   ├── logging/                    # 结构化日志 (log/slog，固定写入可执行文件同目录，nopHandler零开销)
+│   ├── autoupdate/                 # 客户端每日首次调用自动后台静默同步与升级 (防抖状态戳、Detached 子进程)
 │   ├── node/                       # 跨平台硬件指纹 (Linux/Windows Machine-ID -> SHA256)
 │   ├── model/                      # 遥测模型、归一化与 UTF-8 乱码清洗器
 │   ├── render/                     # 终端 ANSI 状态栏渲染核心与自适应排版
@@ -163,6 +164,13 @@ go test ./... -v
   statusline-server upgrade -all   # 同时升级 statusline-server 及同目录下的 statusline
   statusline-server upgrade -check # 检查服务端可用更新
   ```
+- **客户端每日首次调用自动后台静默同步与升级 (`auto-update`)**:
+  ```bash
+  statusline auto-update           # 手动触发每日配置同步与自动升级检查
+  statusline auto-update -check    # 仅检查新版本与配置，不修改本地文件
+  statusline auto-update -force    # 强制执行（即使今日已执行过）
+  ```
+  AI CLI (`agy` / `claude`) 每天首次唤起 `statusline` 渲染状态行后，自动在后台静默拉起独立 Detached 进程：从服务端同步别名与优先级并写入 `client.yaml`，若检测到官方发布新版本则自动执行原地原子升级（零终端延迟、零 stdout 污染、并发状态戳防抖）。可通过 `client.yaml` 中的 `auto_sync:` 块灵活开启或关闭。
 - **自定义环境变量**:
   - `export STATUSLINE_SERVER_URL="http://127.0.0.1:8628/api/v1/report"`（修改上报地址）
   - `export STATUSLINE_SERVER_URL="off"`（停用遥测上报，纯本地离线渲染）

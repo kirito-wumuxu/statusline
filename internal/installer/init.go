@@ -222,24 +222,15 @@ func SyncAliasesFromRemote(out io.Writer) {
 	}
 
 	// Update local client.yaml
-	clientYamlPath := "client.yaml"
-	exe, err := os.Executable()
-	if err == nil {
-		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-			exeDir := filepath.Dir(resolved)
-			targetInExeDir := filepath.Join(exeDir, "client.yaml")
-			if _, err := os.Stat(targetInExeDir); err == nil {
-				clientYamlPath = targetInExeDir
-			}
-		}
-	}
+	clientYamlPath := config.FindClientConfigFile()
 
 	// Read existing or create new
-	var fileCfg config.ClientConfig
-	if data, err := os.ReadFile(clientYamlPath); err == nil {
-		_ = yaml.Unmarshal(data, &fileCfg)
-	} else {
+	fileCfg := *config.DefaultClientConfig()
+	if cfg != nil {
 		fileCfg = *cfg
+	}
+	if data, err := os.ReadFile(clientYamlPath); err == nil && len(data) > 0 {
+		_ = yaml.Unmarshal(data, &fileCfg)
 	}
 
 	fileCfg.Aliases = config.DisplayAliasesConfig{

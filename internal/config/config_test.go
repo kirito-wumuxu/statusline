@@ -69,6 +69,30 @@ func TestClientEnvOverrides(t *testing.T) {
 	if len(cfg.Display.Segments) != 3 || cfg.Display.Segments[0] != "account" {
 		t.Fatalf("expected segments override, got %v", cfg.Display.Segments)
 	}
+
+	// Test AutoSync defaults
+	if !cfg.AutoSync.Enabled || !cfg.AutoSync.SyncAliases || !cfg.AutoSync.AutoUpgrade {
+		t.Fatalf("expected default AutoSync to be all true, got: %+v", cfg.AutoSync)
+	}
+
+	// Test AutoSync env overrides
+	os.Setenv("STATUSLINE_AUTO_SYNC", "false")
+	defer os.Unsetenv("STATUSLINE_AUTO_SYNC")
+	os.Setenv("STATUSLINE_AUTO_UPGRADE", "0")
+	defer os.Unsetenv("STATUSLINE_AUTO_UPGRADE")
+	os.Setenv("STATUSLINE_SYNC_ALIASES", "true")
+	defer os.Unsetenv("STATUSLINE_SYNC_ALIASES")
+
+	cfg2 := DefaultClientConfig()
+	if cfg2.AutoSync.Enabled != false {
+		t.Fatalf("expected AutoSync.Enabled override false, got %v", cfg2.AutoSync.Enabled)
+	}
+	if cfg2.AutoSync.AutoUpgrade != false {
+		t.Fatalf("expected AutoSync.AutoUpgrade override false, got %v", cfg2.AutoSync.AutoUpgrade)
+	}
+	if cfg2.AutoSync.SyncAliases != true {
+		t.Fatalf("expected AutoSync.SyncAliases override true, got %v", cfg2.AutoSync.SyncAliases)
+	}
 }
 
 func TestServerEnvOverrides(t *testing.T) {
