@@ -11,6 +11,8 @@ func TestProbeRecentUsage(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "transcript.jsonl")
 	sessionID := "test-session-123"
+	os.Remove(getOffsetFilePath(sessionID))
+	defer os.Remove(getOffsetFilePath(sessionID))
 
 	// 1. 写入初始行 (普通用户请求，无 usage)
 	line1 := `{"step_index": 0, "type": "USER_INPUT", "created_at": "2026-11-16T10:00:00Z"}` + "\n"
@@ -62,6 +64,8 @@ func TestProbeRecentUsageTruncationReset(t *testing.T) {
 	tmpDir := t.TempDir()
 	logPath := filepath.Join(tmpDir, "transcript.jsonl")
 	sessionID := "test-session-trunc"
+	os.Remove(getOffsetFilePath(sessionID))
+	defer os.Remove(getOffsetFilePath(sessionID))
 
 	// 写入长日志
 	line1 := `{"step_index": 1, "type": "PLANNER_RESPONSE", "input_tokens": 100, "output_tokens": 20}` + "\n"
