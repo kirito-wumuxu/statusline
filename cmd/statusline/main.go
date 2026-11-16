@@ -109,7 +109,7 @@ func runSyncCommand(args []string, out io.Writer) error {
 
 	fmt.Fprintf(out, "[2/3] 正在向服务端上传转录事件 (目标: %s)...\n", syncEndpoint)
 
-	const chunkSize = 500
+	const chunkSize = 200
 	totalInserted := 0
 	totalSkipped := 0
 	client := &http.Client{Timeout: 60 * time.Second}
@@ -130,44 +130,71 @@ func runSyncCommand(args []string, out io.Writer) error {
 			return fmt.Errorf("序列化批次失败: %w", err)
 		}
 
-		req, err := http.NewRequest(http.MethodPost, syncEndpoint, bytes.NewReader(bodyBytes))
-		if err != nil {
-			return fmt.Errorf("创建请求失败: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if cfg.Report.APIKey != "" {
-			req.Header.Set("X-API-Key", cfg.Report.APIKey)
-		}
+		var lastErr error
+		var batchInserted, batchSkipped int
+		maxRetries := 3
 
-		resp, err := client.Do(req)
-		if err != nil {
-			return fmt.Errorf("推送批次失败: %w", err)
-		}
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			req, err := http.NewRequest(http.MethodPost, syncEndpoint, bytes.NewReader(bodyBytes))
+			if err != nil {
+				return fmt.Errorf("创建请求失败: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if cfg.Report.APIKey != "" {
+				req.Header.Set("X-API-Key", cfg.Report.APIKey)
+			}
 
-		if resp.StatusCode != http.StatusOK {
+			resp, err := client.Do(req)
+			if err != nil {
+				lastErr = err
+				if attempt < maxRetries {
+					time.Sleep(time.Duration(attempt) * time.Second)
+					continue
+				}
+				return fmt.Errorf("推送批次失败: %w", lastErr)
+			}
+
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+
 			if resp.StatusCode == http.StatusNotFound {
 				return fmt.Errorf("服务端同步接口不可用 (HTTP 404: %s)\n提示: 远端服务尚未启用批量同步接口，请在服务器上更新并重启 statusline-server 服务", syncEndpoint)
 			}
-			return fmt.Errorf("服务端返回异常 (HTTP %d): %s", resp.StatusCode, string(respBody))
+
+			if resp.StatusCode != http.StatusOK {
+				if resp.StatusCode >= 500 && attempt < maxRetries {
+					time.Sleep(time.Duration(attempt) * time.Second)
+					continue
+				}
+				return fmt.Errorf("服务端返回异常 (HTTP %d): %s", resp.StatusCode, string(respBody))
+			}
+
+			var res struct {
+				Status   string `json:"status"`
+				Received int    `json:"received"`
+				Inserted int    `json:"inserted"`
+				Skipped  int    `json:"skipped"`
+			}
+			if err := json.Unmarshal(respBody, &res); err != nil {
+				return fmt.Errorf("解析服务端响应失败: %w", err)
+			}
+
+			batchInserted = res.Inserted
+			batchSkipped = res.Skipped
+			lastErr = nil
+			break
 		}
 
-		var res struct {
-			Status   string `json:"status"`
-			Received int    `json:"received"`
-			Inserted int    `json:"inserted"`
-			Skipped  int    `json:"skipped"`
+		if lastErr != nil {
+			return fmt.Errorf("推送批次重试失败: %w", lastErr)
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-			resp.Body.Close()
-			return fmt.Errorf("解析服务端响应失败: %w", err)
-		}
-		resp.Body.Close()
 
-		totalInserted += res.Inserted
-		totalSkipped += res.Skipped
+		totalInserted += batchInserted
+		totalSkipped += batchSkipped
 		fmt.Fprintf(out, "      已处理: %d/%d (新增入库: %d, 跳过重复: %d)...\n", end, len(summary.Events), totalInserted, totalSkipped)
+
+		// Brief pause between chunks to allow SQLite WAL checkpoint and concurrent requests
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	fmt.Fprintf(out, "[3/3] 转录同步完成!\n")

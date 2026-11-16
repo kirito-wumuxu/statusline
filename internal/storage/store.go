@@ -304,6 +304,9 @@ func (s *Store) IngestSyncBatch(ctx context.Context, batch *SyncBatch) (*SyncBat
 		return &SyncBatchResult{}, nil
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	result := &SyncBatchResult{
 		Received: len(batch.Events),
 	}
@@ -318,7 +321,6 @@ func (s *Store) IngestSyncBatch(ctx context.Context, batch *SyncBatch) (*SyncBat
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare check statement: %w", err)
 	}
-	defer checkStmt.Close()
 
 	insertEventSQL := `
 	INSERT INTO telemetry_events (
@@ -329,9 +331,9 @@ func (s *Store) IngestSyncBatch(ctx context.Context, batch *SyncBatch) (*SyncBat
 
 	insertStmt, err := tx.PrepareContext(ctx, insertEventSQL)
 	if err != nil {
+		checkStmt.Close()
 		return nil, fmt.Errorf("failed to prepare insert statement: %w", err)
 	}
-	defer insertStmt.Close()
 
 	upsertSessionSQL := `
 	INSERT INTO sessions (
@@ -343,9 +345,10 @@ func (s *Store) IngestSyncBatch(ctx context.Context, batch *SyncBatch) (*SyncBat
 
 	upsertSessionStmt, err := tx.PrepareContext(ctx, upsertSessionSQL)
 	if err != nil {
+		checkStmt.Close()
+		insertStmt.Close()
 		return nil, fmt.Errorf("failed to prepare session statement: %w", err)
 	}
-	defer upsertSessionStmt.Close()
 
 	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
 	nodeID := batch.NodeID
@@ -395,11 +398,19 @@ func (s *Store) IngestSyncBatch(ctx context.Context, batch *SyncBatch) (*SyncBat
 			e.ModelID, e.ModelDisplayName, e.CurrentInputTokens, e.CurrentOutputTokens,
 			e.CacheReadTokens, e.CacheCreationTokens, rawPayload,
 		); err != nil {
+			checkStmt.Close()
+			insertStmt.Close()
+			upsertSessionStmt.Close()
 			return nil, fmt.Errorf("failed to insert sync event: %w", err)
 		}
 
 		result.Inserted++
 	}
+
+	// Close all prepared statements BEFORE committing the transaction
+	checkStmt.Close()
+	insertStmt.Close()
+	upsertSessionStmt.Close()
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("failed to commit sync batch: %w", err)
