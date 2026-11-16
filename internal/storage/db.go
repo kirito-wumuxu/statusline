@@ -57,6 +57,7 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 
 	// Idempotent column migrations for existing databases
 	_, _ = db.Exec("ALTER TABLE display_aliases ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;")
+	_, _ = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_prompt ON telemetry_events(session_id, prompt_id) WHERE prompt_id IS NOT NULL AND prompt_id != '';")
 
 	// Initialize default display aliases
 	if err := initDefaultAliases(db); err != nil {

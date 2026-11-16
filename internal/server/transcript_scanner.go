@@ -204,98 +204,94 @@ func (s *TranscriptScanner) syncSingleFile(ctx context.Context, cand sessionCand
 	}
 
 	var toInsert []eventToInsert
-	scanner := bufio.NewScanner(file)
-	// Support long JSON lines up to 2MB
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 2*1024*1024)
-
+	reader := bufio.NewReader(file)
 	lineIdx := 0
-	for scanner.Scan() {
-		lineIdx++
-		lineBytes := bytes.TrimSpace(scanner.Bytes())
-		if len(lineBytes) == 0 {
-			continue
-		}
 
-		var step transcriptStep
-		if err := json.Unmarshal(lineBytes, &step); err != nil {
-			continue
-		}
+	for {
+		lineBytes, err := reader.ReadBytes('\n')
+		if len(lineBytes) > 0 {
+			lineIdx++
+			trimmed := bytes.TrimSpace(lineBytes)
+			if len(trimmed) > 0 {
+				var step transcriptStep
+				if jsonErr := json.Unmarshal(trimmed, &step); jsonErr == nil {
+					promptID := ""
+					if step.StepIndex != nil {
+						promptID = fmt.Sprintf("step_%d", *step.StepIndex)
+					} else if step.UUID != "" {
+						promptID = step.UUID
+					} else if step.MessageID != "" {
+						promptID = step.MessageID
+					} else {
+						promptID = fmt.Sprintf("line_%d", lineIdx)
+					}
 
-		promptID := ""
-		if step.StepIndex != nil {
-			promptID = fmt.Sprintf("step_%d", *step.StepIndex)
-		} else if step.UUID != "" {
-			promptID = step.UUID
-		} else if step.MessageID != "" {
-			promptID = step.MessageID
-		} else {
-			promptID = fmt.Sprintf("line_%d", lineIdx)
-		}
+					if !existingPrompts[promptID] {
+						var inTokens, outTokens, cacheRead, cacheCreate int64
+						modelID := cand.LatestModelID
+						if modelID == "" {
+							modelID = "gemini-3.8-flash-high"
+						}
 
-		if existingPrompts[promptID] {
-			continue
-		}
+						// Antigravity format
+						if step.Type == "PLANNER_RESPONSE" || (step.InputTokens != nil || step.OutputTokens != nil) {
+							if step.InputTokens != nil {
+								inTokens = *step.InputTokens
+							}
+							if step.OutputTokens != nil {
+								outTokens = *step.OutputTokens
+							}
+							if step.CacheReadTokens != nil {
+								cacheRead = *step.CacheReadTokens
+							}
+						}
 
-		var inTokens, outTokens, cacheRead, cacheCreate int64
-		modelID := cand.LatestModelID
-		if modelID == "" {
-			modelID = "gemini-3.8-flash-high"
-		}
+						// Claude Code format
+						if step.Message != nil && step.Message.Usage != nil {
+							inTokens = step.Message.Usage.InputTokens
+							outTokens = step.Message.Usage.OutputTokens
+							cacheRead = step.Message.Usage.CacheReadInputTokens
+							cacheCreate = step.Message.Usage.CacheCreationInputTokens
+							if step.Message.Model != "" {
+								modelID = step.Message.Model
+							}
+						}
 
-		// Antigravity format
-		if step.Type == "PLANNER_RESPONSE" || (step.InputTokens != nil || step.OutputTokens != nil) {
-			if step.InputTokens != nil {
-				inTokens = *step.InputTokens
+						// Only insert steps with non-zero tokens
+						if inTokens > 0 || outTokens > 0 || cacheRead > 0 || cacheCreate > 0 {
+							repAt := step.CreatedAt
+							if repAt == "" {
+								repAt = step.Timestamp
+							}
+							if repAt == "" {
+								repAt = time.Now().UTC().Format(time.RFC3339Nano)
+							} else if t, err := time.Parse(time.RFC3339, repAt); err == nil {
+								repAt = t.UTC().Format(time.RFC3339Nano)
+							}
+
+							toInsert = append(toInsert, eventToInsert{
+								SessionID:           cand.SessionID,
+								NodeID:              cand.NodeID,
+								PromptID:            promptID,
+								ProductType:         cand.ProductType,
+								ReportedAt:          repAt,
+								ModelID:             modelID,
+								ModelDisplayName:    "", // Leave empty so MAX(model_display_name) retains human-readable title
+								CurrentInputTokens:  inTokens,
+								CurrentOutputTokens: outTokens,
+								CacheReadTokens:     cacheRead,
+								CacheCreationTokens: cacheCreate,
+							})
+							existingPrompts[promptID] = true
+						}
+					}
+				}
 			}
-			if step.OutputTokens != nil {
-				outTokens = *step.OutputTokens
-			}
-			if step.CacheReadTokens != nil {
-				cacheRead = *step.CacheReadTokens
-			}
 		}
 
-		// Claude Code format
-		if step.Message != nil && step.Message.Usage != nil {
-			inTokens = step.Message.Usage.InputTokens
-			outTokens = step.Message.Usage.OutputTokens
-			cacheRead = step.Message.Usage.CacheReadInputTokens
-			cacheCreate = step.Message.Usage.CacheCreationInputTokens
-			if step.Message.Model != "" {
-				modelID = step.Message.Model
-			}
+		if err != nil {
+			break
 		}
-
-		// Skip steps with 0 token consumption
-		if inTokens == 0 && outTokens == 0 && cacheRead == 0 && cacheCreate == 0 {
-			continue
-		}
-
-		repAt := step.CreatedAt
-		if repAt == "" {
-			repAt = step.Timestamp
-		}
-		if repAt == "" {
-			repAt = time.Now().UTC().Format(time.RFC3339Nano)
-		} else if t, err := time.Parse(time.RFC3339, repAt); err == nil {
-			repAt = t.UTC().Format(time.RFC3339Nano)
-		}
-
-		toInsert = append(toInsert, eventToInsert{
-			SessionID:           cand.SessionID,
-			NodeID:              cand.NodeID,
-			PromptID:            promptID,
-			ProductType:         cand.ProductType,
-			ReportedAt:          repAt,
-			ModelID:             modelID,
-			ModelDisplayName:    modelID,
-			CurrentInputTokens:  inTokens,
-			CurrentOutputTokens: outTokens,
-			CacheReadTokens:     cacheRead,
-			CacheCreationTokens: cacheCreate,
-		})
-		existingPrompts[promptID] = true
 	}
 
 	if len(toInsert) == 0 {

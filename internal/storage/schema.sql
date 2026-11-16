@@ -79,6 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_events_session_time ON telemetry_events(session_i
 CREATE INDEX IF NOT EXISTS idx_events_session_window ON telemetry_events(session_id, reported_at ASC, id ASC);
 CREATE INDEX IF NOT EXISTS idx_events_node_time ON telemetry_events(node_id, reported_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_reported_at ON telemetry_events(reported_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_events_session_prompt ON telemetry_events(session_id, prompt_id) WHERE prompt_id IS NOT NULL AND prompt_id != '';
 
 -- 4. 账号配额实时状态表 (account_quotas)
 CREATE TABLE IF NOT EXISTS account_quotas (

@@ -12,6 +12,9 @@ func (s *Server) handleSyncTranscripts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
 	scanner := NewTranscriptScanner(s.store)
 	start := time.Now()
 	res, err := scanner.SyncAll(r.Context())

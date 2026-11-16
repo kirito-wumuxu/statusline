@@ -100,6 +100,9 @@ func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 	// Probe real API tokens from transcript tail if path is available
 	if env != nil && env.Normalized.TranscriptPath != "" {
 		usage := transcript.ProbeRecentUsage(env.Normalized.TranscriptPath, env.Normalized.SessionID, 5*time.Millisecond)
+		if usage.PromptID != "" {
+			env.Normalized.PromptID = usage.PromptID
+		}
 		if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.CacheReadTokens > 0 || usage.CacheCreationTokens > 0 {
 			env.Normalized.CurrentInputTokens = usage.InputTokens
 			env.Normalized.CurrentOutputTokens = usage.OutputTokens

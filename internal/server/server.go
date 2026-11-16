@@ -3,6 +3,7 @@ package server
 import (
 	"io/fs"
 	"net/http"
+	"sync"
 
 	"statusline/internal/config"
 	"statusline/internal/storage"
@@ -14,6 +15,7 @@ type Server struct {
 	router  *http.ServeMux
 	webFS   fs.FS
 	version string
+	syncMu  sync.Mutex
 }
 
 func (s *Server) SetVersion(v string) {

@@ -175,25 +175,6 @@ func (s *Store) Ingest(env *model.TelemetryEnvelope) error {
 		sessionID = fmt.Sprintf("sess_%s_%s", nodeID, norm.ProductType)
 	}
 
-	// Auto-compute turn delta if current turn tokens were not explicitly provided
-	curIn := norm.CurrentInputTokens
-	curOut := norm.CurrentOutputTokens
-	if curIn == 0 && curOut == 0 && (norm.TotalInputTokens > 0 || norm.TotalOutputTokens > 0) {
-		var prevIn, prevOut int64
-		row := tx.QueryRow("SELECT COALESCE(total_input_tokens, 0), COALESCE(total_output_tokens, 0) FROM sessions WHERE session_id = ?", sessionID)
-		if err := row.Scan(&prevIn, &prevOut); err == nil {
-			if norm.TotalInputTokens > prevIn {
-				curIn = norm.TotalInputTokens - prevIn
-			}
-			if norm.TotalOutputTokens > prevOut {
-				curOut = norm.TotalOutputTokens - prevOut
-			}
-		} else {
-			curIn = norm.TotalInputTokens
-			curOut = norm.TotalOutputTokens
-		}
-	}
-
 	upsertSessionSQL := `
 	INSERT INTO sessions (
 		session_id, node_id, product_type, conversation_id, session_name,
@@ -229,7 +210,34 @@ func (s *Store) Ingest(env *model.TelemetryEnvelope) error {
 		return fmt.Errorf("failed to upsert session: %w", err)
 	}
 
-	// Step 3: INSERT telemetry_events
+	// Step 3: UPSERT account_quotas
+	if norm.AccountEmail != "" && len(norm.Quotas) > 0 {
+		upsertQuotaSQL := `
+		INSERT INTO account_quotas (account_email, quota_key, remaining_fraction, reset_time, reset_in_seconds, last_node_id, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(account_email, quota_key) DO UPDATE SET
+			remaining_fraction = excluded.remaining_fraction,
+			reset_time = excluded.reset_time,
+			reset_in_seconds = excluded.reset_in_seconds,
+			last_node_id = excluded.last_node_id,
+			updated_at = excluded.updated_at;`
+
+		for qKey, qItem := range norm.Quotas {
+			if _, err := tx.Exec(upsertQuotaSQL, norm.AccountEmail, qKey, qItem.RemainingFraction, qItem.ResetTime, qItem.ResetInSeconds, nodeID, nowStr); err != nil {
+				return fmt.Errorf("failed to upsert account quota %s: %w", qKey, err)
+			}
+		}
+	}
+
+	// Step 4: INSERT telemetry_events (with strict idempotency on prompt_id)
+	if norm.PromptID != "" {
+		var existingID int64
+		if err := tx.QueryRow("SELECT id FROM telemetry_events WHERE session_id = ? AND prompt_id = ?", sessionID, norm.PromptID).Scan(&existingID); err == nil {
+			// Step already recorded! Skip duplicate event insertion.
+			return tx.Commit()
+		}
+	}
+
 	quotaJSON, _ := json.Marshal(norm.Quotas)
 	rawPayloadJSON, _ := json.Marshal(env.Payload)
 	exceedsInt := 0
@@ -252,31 +260,12 @@ func (s *Store) Ingest(env *model.TelemetryEnvelope) error {
 		nodeID, sessionID, norm.PromptID, norm.ProductType, nowStr,
 		norm.ModelID, norm.ModelDisplayName, norm.ModelEffort, norm.AgentState,
 		norm.ContextWindowSize, norm.TotalInputTokens, norm.TotalOutputTokens,
-		curIn, curOut, norm.CacheCreationTokens, norm.CacheReadTokens,
+		norm.CurrentInputTokens, norm.CurrentOutputTokens, norm.CacheCreationTokens, norm.CacheReadTokens,
 		norm.UsedPercentage, norm.RemainingPct, exceedsInt,
 		norm.TotalCostUSD, norm.TotalDurationMS, norm.TotalAPIDuration, norm.CacheHitRatio,
 		string(quotaJSON), "", string(rawPayloadJSON),
 	); err != nil {
 		return fmt.Errorf("failed to insert telemetry event: %w", err)
-	}
-
-	// Step 4: UPSERT account_quotas
-	if norm.AccountEmail != "" && len(norm.Quotas) > 0 {
-		upsertQuotaSQL := `
-		INSERT INTO account_quotas (account_email, quota_key, remaining_fraction, reset_time, reset_in_seconds, last_node_id, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(account_email, quota_key) DO UPDATE SET
-			remaining_fraction = excluded.remaining_fraction,
-			reset_time = excluded.reset_time,
-			reset_in_seconds = excluded.reset_in_seconds,
-			last_node_id = excluded.last_node_id,
-			updated_at = excluded.updated_at;`
-
-		for qKey, qItem := range norm.Quotas {
-			if _, err := tx.Exec(upsertQuotaSQL, norm.AccountEmail, qKey, qItem.RemainingFraction, qItem.ResetTime, qItem.ResetInSeconds, nodeID, nowStr); err != nil {
-				return fmt.Errorf("failed to upsert account quota %s: %w", qKey, err)
-			}
-		}
 	}
 
 	return tx.Commit()

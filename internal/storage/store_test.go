@@ -48,8 +48,14 @@ func TestStorageLifecycleAndIngest(t *testing.T) {
 		"email": "dev@example.com",
 		"cwd": "/workspace/statusline",
 		"model": {"id": "gemini-3.8-flash", "display_name": "Gemini 3.8 Flash"},
-		"context_window": {"total_input_tokens": 2500, "total_output_tokens": 800, "context_window_size": 1048576}
+		"context_window": {
+			"current_usage": {"input_tokens": 2500, "output_tokens": 800},
+			"total_input_tokens": 2500, 
+			"total_output_tokens": 800, 
+			"context_window_size": 1048576
+		}
 	}`), n)
+	env2.Normalized.PromptID = "step_1"
 
 	if err := store.Ingest(env2); err != nil {
 		t.Fatalf("failed to ingest env2: %v", err)
@@ -290,40 +296,53 @@ func TestMultiDayTokenConsumptionDelta(t *testing.T) {
 	}
 	defer store.Close()
 
-	n := node.GetNodeInfo("node_delta", "1.0.0")
-
+	stepIdx := 0
 	// Helper to ingest event with custom timestamp
-	ingestEventWithTime := func(sessionID, modelID string, inTokens, outTokens int64, timeStr string) {
-		payload := fmt.Sprintf(`{
-			"product": "antigravity",
-			"session_id": "%s",
-			"cwd": "/workspace",
-			"model": {"id": "%s", "display_name": "%s"},
-			"context_window": {"total_input_tokens": %d, "total_output_tokens": %d, "context_window_size": 1048576}
-		}`, sessionID, modelID, modelID, inTokens, outTokens)
-		env, _, err := model.ParseAndNormalize([]byte(payload), n)
-		if err != nil {
-			t.Fatalf("failed to parse: %v", err)
+	ingestEventWithTime := func(sessionID, modelID string, curIn, curOut int64, timeStr string) {
+		stepIdx++
+		env := &model.TelemetryEnvelope{
+			NodeID:     "node_delta",
+			ReportedAt: timeStr,
+			Normalized: model.NormalizedData{
+				ProductType:         "antigravity",
+				SessionID:           sessionID,
+				ModelID:             modelID,
+				ModelDisplayName:    modelID,
+				PromptID:            fmt.Sprintf("step_%d", stepIdx),
+				CurrentInputTokens:  curIn,
+				CurrentOutputTokens: curOut,
+			},
 		}
-		env.ReportedAt = timeStr
 		if err := store.Ingest(env); err != nil {
 			t.Fatalf("failed to ingest: %v", err)
 		}
 	}
 
-	// Day 1 (yesterday): Session starts, reaches 2000 in, 1200 out
+	// Day 1 (yesterday): 2 turns, total 2000 in, 1200 out
 	tYesterday := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02T15:04:05Z")
 	tYesterdayDate := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02")
 	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 1000, 500, tYesterday)
-	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 2000, 1200, tYesterday)
+	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 1000, 700, tYesterday)
 
-	// Day 2 (today): Continues same session, reaches 2500 in (+500), 1600 out (+400)
+	// Day 2 (today): 1 turn with 500 in, 400 out
 	tToday := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	tTodayDate := time.Now().UTC().Format("2006-01-02")
-	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 2500, 1600, tToday)
+	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 500, 400, tToday)
 
-	// Ingest an idle event with same tokens on today (should not inflate delta)
-	ingestEventWithTime("sess-delta-1", "gemini-3.8-flash", 2500, 1600, tToday)
+	// Ingest an idle event with 0 turn tokens and empty prompt_id (should not insert junk event)
+	idleEnv := &model.TelemetryEnvelope{
+		NodeID:     "node_delta",
+		ReportedAt: tToday,
+		Normalized: model.NormalizedData{
+			ProductType:      "antigravity",
+			SessionID:        "sess-delta-1",
+			ModelID:          "gemini-3.8-flash",
+			ModelDisplayName: "gemini-3.8-flash",
+		},
+	}
+	if err := store.Ingest(idleEnv); err != nil {
+		t.Fatalf("failed to ingest idle: %v", err)
+	}
 
 	// Query GetDailyModelTokens
 	daily, err := store.GetDailyModelTokens(7)
@@ -375,21 +394,22 @@ func TestMultiModelSessionTokenDelta(t *testing.T) {
 	}
 	defer store.Close()
 
-	n := node.GetNodeInfo("node_multimodel", "1.0.0")
-
+	stepCount := 0
 	ingestEvent := func(sessionID, modelID, displayName string, inTokens, outTokens int64, timeStr string) {
-		payload := fmt.Sprintf(`{
-			"product": "antigravity",
-			"session_id": "%s",
-			"cwd": "/workspace",
-			"model": {"id": "%s", "display_name": "%s"},
-			"context_window": {"total_input_tokens": %d, "total_output_tokens": %d, "context_window_size": 1048576}
-		}`, sessionID, modelID, displayName, inTokens, outTokens)
-		env, _, err := model.ParseAndNormalize([]byte(payload), n)
-		if err != nil {
-			t.Fatalf("failed to parse: %v", err)
+		stepCount++
+		env := &model.TelemetryEnvelope{
+			NodeID:     "node_multimodel",
+			ReportedAt: timeStr,
+			Normalized: model.NormalizedData{
+				ProductType:         "antigravity",
+				SessionID:           sessionID,
+				ModelID:             modelID,
+				ModelDisplayName:    displayName,
+				PromptID:            fmt.Sprintf("step_%d", stepCount),
+				CurrentInputTokens:  inTokens,
+				CurrentOutputTokens: outTokens,
+			},
 		}
-		env.ReportedAt = timeStr
 		if err := store.Ingest(env); err != nil {
 			t.Fatalf("failed to ingest: %v", err)
 		}
@@ -399,27 +419,27 @@ func TestMultiModelSessionTokenDelta(t *testing.T) {
 	tYesterday := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02T15:04:05Z")
 	tYesterdayDate := time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02")
 
-	// Session starts with gpt-oss
+	// Session starts with gpt-oss: turn 1 (5000 in, 1000 out), turn 2 (3000 in, 1500 out) -> 8000 in, 2500 out
 	ingestEvent("sess-switch-1", "gpt-oss", "GPT-OSS 120B", 5000, 1000, tYesterday)
-	ingestEvent("sess-switch-1", "gpt-oss", "GPT-OSS 120B", 8000, 2500, tYesterday)
+	ingestEvent("sess-switch-1", "gpt-oss", "GPT-OSS 120B", 3000, 1500, tYesterday)
 
-	// User switches to claude-opus in the same session
-	ingestEvent("sess-switch-1", "claude-opus", "Claude Opus", 12000, 4000, tYesterday)
+	// User switches to claude-opus in the same session: turn 3 (4000 in, 1500 out)
+	ingestEvent("sess-switch-1", "claude-opus", "Claude Opus", 4000, 1500, tYesterday)
 
-	// User switches to gemini-flash in the same session
-	ingestEvent("sess-switch-1", "gemini-flash", "Gemini Flash", 15000, 6000, tYesterday)
+	// User switches to gemini-flash in the same session: turn 4 (3000 in, 2000 out)
+	ingestEvent("sess-switch-1", "gemini-flash", "Gemini Flash", 3000, 2000, tYesterday)
 
-	// User switches back to gpt-oss
-	ingestEvent("sess-switch-1", "gpt-oss", "GPT-OSS 120B", 18000, 7500, tYesterday)
+	// User switches back to gpt-oss: turn 5 (3000 in, 1500 out) -> gpt-oss total = 11000 in, 4000 out = 15000
+	ingestEvent("sess-switch-1", "gpt-oss", "GPT-OSS 120B", 3000, 1500, tYesterday)
 
 	// Day 2 (today)
 	tToday := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	tTodayDate := time.Now().UTC().Format("2006-01-02")
 
-	// Continues with gemini-flash today
-	ingestEvent("sess-switch-1", "gemini-flash", "Gemini Flash", 20000, 8500, tToday)
-	// Switches to claude-opus today
-	ingestEvent("sess-switch-1", "claude-opus", "Claude Opus", 23000, 9500, tToday)
+	// Continues with gemini-flash today: turn 6 (2000 in, 1000 out)
+	ingestEvent("sess-switch-1", "gemini-flash", "Gemini Flash", 2000, 1000, tToday)
+	// Switches to claude-opus today: turn 7 (3000 in, 1000 out)
+	ingestEvent("sess-switch-1", "claude-opus", "Claude Opus", 3000, 1000, tToday)
 
 	// Query daily model tokens
 	daily, err := store.GetDailyModelTokens(7)
@@ -632,5 +652,55 @@ func TestDailyModelTokensAtomicAggregation(t *testing.T) {
 	}
 	if sum.TotalCacheReadTokens != 75000 {
 		t.Fatalf("expected cache read tokens 75000, got %d", sum.TotalCacheReadTokens)
+	}
+}
+
+func TestIngestPromptIDDeduplication(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_dedup.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	sessID := "sess-dedup-test"
+	env1 := &model.TelemetryEnvelope{
+		ReportedAt: "2026-11-16T10:00:00Z",
+		Normalized: model.NormalizedData{
+			ProductType:         "antigravity",
+			SessionID:           sessID,
+			ModelID:             "gemini-flash",
+			PromptID:            "step_1",
+			CurrentInputTokens:  1000,
+			CurrentOutputTokens: 200,
+		},
+	}
+	if err := store.Ingest(env1); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ingest exact duplicate with same (session_id, prompt_id)
+	env2 := &model.TelemetryEnvelope{
+		ReportedAt: "2026-11-16T10:00:05Z",
+		Normalized: model.NormalizedData{
+			ProductType:         "antigravity",
+			SessionID:           sessID,
+			ModelID:             "gemini-flash",
+			PromptID:            "step_1",
+			CurrentInputTokens:  1000,
+			CurrentOutputTokens: 200,
+		},
+	}
+	if err := store.Ingest(env2); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify telemetry_events contains only 1 row!
+	var count int
+	if err := store.DB().QueryRow("SELECT COUNT(*) FROM telemetry_events WHERE session_id = ?", sessID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 event after duplicate ingest, got %d", count)
 	}
 }

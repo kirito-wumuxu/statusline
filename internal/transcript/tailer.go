@@ -15,6 +15,7 @@ import (
 
 // TurnUsage represents atomic tokens consumed in one or more conversation turns.
 type TurnUsage struct {
+	PromptID            string
 	InputTokens         int64
 	OutputTokens        int64
 	CacheReadTokens     int64
@@ -28,6 +29,8 @@ type transcriptLine struct {
 	InputTokens     *int64 `json:"input_tokens,omitempty"`
 	OutputTokens    *int64 `json:"output_tokens,omitempty"`
 	CacheReadTokens *int64 `json:"cache_read_tokens,omitempty"`
+	UUID            string `json:"uuid,omitempty"`
+	MessageID       string `json:"message_id,omitempty"`
 
 	// Claude Code format
 	Message *struct {
@@ -140,6 +143,18 @@ func probe(transcriptPath string, sessionID string) TurnUsage {
 	}
 	defer file.Close()
 
+	// Memory safety cap: if gap exceeds 2MB, seek forward to avoid reading unbounded data
+	const maxScanBytes = 2 * 1024 * 1024
+	if fileSize-lastOffset > maxScanBytes {
+		lastOffset = fileSize - maxScanBytes
+		if _, err := file.Seek(lastOffset, io.SeekStart); err == nil {
+			// Advance to next newline boundary
+			discardReader := bufio.NewReader(file)
+			discardBytes, _ := discardReader.ReadBytes('\n')
+			lastOffset += int64(len(discardBytes))
+		}
+	}
+
 	if _, err := file.Seek(lastOffset, io.SeekStart); err != nil {
 		return TurnUsage{}
 	}
@@ -151,11 +166,19 @@ func probe(transcriptPath string, sessionID string) TurnUsage {
 	for {
 		lineBytes, err := reader.ReadBytes('\n')
 		if len(lineBytes) > 0 {
+			// If we hit EOF without a trailing newline, this is a partial write in progress.
+			// Do NOT advance offset past the incomplete line; wait for the next full flush.
+			if err == io.EOF && !bytes.HasSuffix(lineBytes, []byte("\n")) {
+				break
+			}
+
 			currentOffset += int64(len(lineBytes))
 			trimmed := bytes.TrimSpace(lineBytes)
 			if len(trimmed) > 0 {
 				var tl transcriptLine
 				if jsonErr := json.Unmarshal(trimmed, &tl); jsonErr == nil {
+					hasTokens := false
+
 					// 1. Antigravity format
 					if tl.Type == "PLANNER_RESPONSE" || (tl.InputTokens != nil || tl.OutputTokens != nil) {
 						if tl.InputTokens != nil {
@@ -167,6 +190,7 @@ func probe(transcriptPath string, sessionID string) TurnUsage {
 						if tl.CacheReadTokens != nil {
 							usage.CacheReadTokens += *tl.CacheReadTokens
 						}
+						hasTokens = (tl.InputTokens != nil && *tl.InputTokens > 0) || (tl.OutputTokens != nil && *tl.OutputTokens > 0) || (tl.CacheReadTokens != nil && *tl.CacheReadTokens > 0)
 					}
 
 					// 2. Claude Code format
@@ -175,6 +199,7 @@ func probe(transcriptPath string, sessionID string) TurnUsage {
 						usage.OutputTokens += tl.Message.Usage.OutputTokens
 						usage.CacheReadTokens += tl.Message.Usage.CacheReadInputTokens
 						usage.CacheCreationTokens += tl.Message.Usage.CacheCreationInputTokens
+						hasTokens = true
 					}
 
 					// 3. Generic usage wrapper
@@ -187,6 +212,17 @@ func probe(transcriptPath string, sessionID string) TurnUsage {
 						}
 						usage.CacheReadTokens += cacheRead
 						usage.CacheCreationTokens += tl.Usage.CacheCreationInputTokens
+						hasTokens = true
+					}
+
+					if hasTokens {
+						if tl.StepIndex != nil {
+							usage.PromptID = fmt.Sprintf("step_%d", *tl.StepIndex)
+						} else if tl.UUID != "" {
+							usage.PromptID = tl.UUID
+						} else if tl.MessageID != "" {
+							usage.PromptID = tl.MessageID
+						}
 					}
 				}
 			}

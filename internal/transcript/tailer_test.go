@@ -91,3 +91,62 @@ func TestProbeRecentUsageTruncationReset(t *testing.T) {
 		t.Fatalf("expected 50 in, 10 out after truncation reset, got %+v", uReset)
 	}
 }
+
+func TestProbeRecentUsagePromptID(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "transcript.jsonl")
+	sessionID := "test-session-promptid"
+	os.Remove(getOffsetFilePath(sessionID))
+	defer os.Remove(getOffsetFilePath(sessionID))
+
+	line := `{"step_index": 42, "type": "PLANNER_RESPONSE", "input_tokens": 100, "output_tokens": 50}` + "\n"
+	if err := os.WriteFile(logPath, []byte(line), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	u := ProbeRecentUsage(logPath, sessionID, 50*time.Millisecond)
+	if u.PromptID != "step_42" {
+		t.Fatalf("expected prompt_id 'step_42', got %q", u.PromptID)
+	}
+}
+
+func TestProbeRecentUsageIncompleteLineAtEOF(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "transcript.jsonl")
+	sessionID := "test-session-incomplete"
+	os.Remove(getOffsetFilePath(sessionID))
+	defer os.Remove(getOffsetFilePath(sessionID))
+
+	// 1. 写入完整的 Step 1，和一个写了一半的残缺行（无换行符）
+	line1 := `{"step_index": 1, "type": "PLANNER_RESPONSE", "input_tokens": 100, "output_tokens": 20}` + "\n"
+	partial := `{"step_index": 2, "type": "PLANNER_RES`
+	if err := os.WriteFile(logPath, []byte(line1+partial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	u1 := ProbeRecentUsage(logPath, sessionID, 50*time.Millisecond)
+	if u1.InputTokens != 100 || u1.OutputTokens != 20 {
+		t.Fatalf("expected 100 in, 20 out from first full line, got %+v", u1)
+	}
+	if u1.PromptID != "step_1" {
+		t.Fatalf("expected prompt_id 'step_1', got %q", u1.PromptID)
+	}
+
+	// 2. 模拟写入完成：补全残缺行并换行
+	completed := `PONSE", "input_tokens": 200, "output_tokens": 40}` + "\n"
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(completed)
+	f.Close()
+
+	// 再次探测，应该正确从完整的 line2 开始读取，得到 200 in, 40 out
+	u2 := ProbeRecentUsage(logPath, sessionID, 50*time.Millisecond)
+	if u2.InputTokens != 200 || u2.OutputTokens != 40 {
+		t.Fatalf("expected 200 in, 40 out from completed line, got %+v", u2)
+	}
+	if u2.PromptID != "step_2" {
+		t.Fatalf("expected prompt_id 'step_2', got %q", u2.PromptID)
+	}
+}
