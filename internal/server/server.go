@@ -44,8 +44,8 @@ func (s *Server) routes() {
 	s.router.HandleFunc("POST /api/telemetry", s.handleReport)
 	s.router.HandleFunc("POST /api/v1/refresh", s.handleRefresh)
 	s.router.HandleFunc("POST /api/refresh", s.handleRefresh)
-	s.router.HandleFunc("POST /api/v1/sync/transcripts", s.handleSyncTranscripts)
-	s.router.HandleFunc("POST /api/sync/transcripts", s.handleSyncTranscripts)
+	s.router.HandleFunc("POST /api/v1/sync/events", s.handleSyncEvents)
+	s.router.HandleFunc("POST /api/sync/events", s.handleSyncEvents)
 
 	// REST APIs
 	s.router.HandleFunc("GET /api/v1/sessions", s.handleGetSessions)

@@ -136,3 +136,55 @@ func TestInitCommandIntegration(t *testing.T) {
 		t.Errorf("expected binPath in settings JSON, got %s", string(data))
 	}
 }
+
+func TestRunSyncCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Mock Antigravity transcript
+	agyDir := filepath.Join(tmpDir, ".gemini", "antigravity-cli", "brain", "test-sess", ".system_generated", "logs")
+	if err := os.MkdirAll(agyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	transcriptData := `{"step_index": 1, "type": "PLANNER_RESPONSE", "created_at": "2026-11-16T10:00:00Z", "input_tokens": 1000, "output_tokens": 50}` + "\n"
+	if err := os.WriteFile(filepath.Join(agyDir, "transcript.jsonl"), []byte(transcriptData), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Mock sync server
+	var receivedBatch bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/sync/events" && r.Method == http.MethodPost {
+			receivedBatch = true
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"status":"ok","received":1,"inserted":1,"skipped":0}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	// 3. Write temp client.yaml
+	cfgPath := filepath.Join(tmpDir, "client.yaml")
+	cfgContent := "report:\n  endpoint: \"" + ts.URL + "/api/v1/report\"\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("STATUSLINE_CONFIG", cfgPath)
+
+	var out bytes.Buffer
+	if err := runSyncCommand([]string{"-home", tmpDir}, &out); err != nil {
+		t.Fatalf("runSyncCommand failed: %v", err)
+	}
+
+	if !receivedBatch {
+		t.Errorf("expected mock server to receive batch, but it didn't")
+	}
+	outStr := out.String()
+	if !strings.Contains(outStr, "[3/3] 转录同步完成!") {
+		t.Errorf("expected completion message, got: %s", outStr)
+	}
+	if !strings.Contains(outStr, "服务端新增入库: 1 条") {
+		t.Errorf("expected 1 inserted, got: %s", outStr)
+	}
+}

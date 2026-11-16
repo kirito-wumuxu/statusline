@@ -1936,33 +1936,3 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 });
 
-
-// 手动触发本地转录同步
-window.triggerTranscriptSync = async function() {
-  const btn = document.getElementById('btn-sync-transcripts');
-  const icon = document.getElementById('sync-icon');
-  if (btn) btn.disabled = true;
-  if (icon) icon.classList.add('animate-spin');
-
-  try {
-    const res = await requestWithAuth(getApiUrl('api/v1/sync/transcripts'), { method: 'POST' });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const text = await res.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (e) {
-      throw new Error(`响应非有效 JSON: ${text.slice(0, 100) || '(空响应)'}`);
-    }
-    alert(`转录同步完成：扫描 ${data.scanned_files} 个转录文件，新增 ${data.new_events} 条交互记录 (${data.elapsed_ms}ms)`);
-    await refreshDashboard(true);
-  } catch (err) {
-    console.error('Transcript sync failed:', err);
-    alert(`转录同步失败: ${err.message}`);
-  } finally {
-    if (btn) btn.disabled = false;
-    if (icon) icon.classList.remove('animate-spin');
-  }
-};

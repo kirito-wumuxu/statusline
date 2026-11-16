@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"statusline/internal/storage"
 )
 
-func (s *Server) handleSyncTranscripts(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSyncEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -20,15 +22,27 @@ func (s *Server) handleSyncTranscripts(w http.ResponseWriter, r *http.Request) {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
-	scanner := NewTranscriptScanner(s.store)
+	var batch storage.SyncBatch
+	if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+		http.Error(w, `{"error":"invalid json body"}`, http.StatusBadRequest)
+		return
+	}
+
 	start := time.Now()
-	res, err := scanner.SyncAll(r.Context())
+	res, err := s.store.IngestSyncBatch(r.Context(), &batch)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	res.ElapsedMS = time.Since(start).Milliseconds()
+
+	resp := map[string]interface{}{
+		"status":     "ok",
+		"received":   res.Received,
+		"inserted":   res.Inserted,
+		"skipped":    res.Skipped,
+		"elapsed_ms": time.Since(start).Milliseconds(),
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	json.NewEncoder(w).Encode(res)
+	_ = json.NewEncoder(w).Encode(resp)
 }

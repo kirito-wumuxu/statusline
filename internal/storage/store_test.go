@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -702,5 +703,113 @@ func TestIngestPromptIDDeduplication(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 event after duplicate ingest, got %d", count)
+	}
+}
+
+func TestIngestSyncBatchDeduplication(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_sync_batch.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	batch1 := &SyncBatch{
+		NodeID: "node_sync_test",
+		Events: []SyncEventItem{
+			{
+				SessionID:           "sess_sync_1",
+				NodeID:              "node_sync_test",
+				PromptID:            "step_1",
+				ProductType:         "antigravity",
+				ReportedAt:          "2026-11-16T08:00:00Z",
+				ModelID:             "gemini-flash",
+				CurrentInputTokens:  1000,
+				CurrentOutputTokens: 200,
+				CacheReadTokens:     500,
+			},
+			{
+				SessionID:           "sess_sync_1",
+				NodeID:              "node_sync_test",
+				PromptID:            "step_2",
+				ProductType:         "antigravity",
+				ReportedAt:          "2026-11-16T08:01:00Z",
+				ModelID:             "gemini-flash",
+				CurrentInputTokens:  1200,
+				CurrentOutputTokens: 250,
+				CacheReadTokens:     800,
+			},
+			{
+				SessionID:           "sess_sync_2",
+				NodeID:              "node_sync_test",
+				PromptID:            "msg_01",
+				ProductType:         "claude_code",
+				ReportedAt:          "2026-11-16T08:02:00Z",
+				ModelID:             "claude-3-7-sonnet",
+				CurrentInputTokens:  2000,
+				CurrentOutputTokens: 300,
+				CacheReadTokens:     1500,
+			},
+		},
+	}
+
+	// 1st Ingestion: all 3 should be inserted
+	res1, err := store.IngestSyncBatch(ctx, batch1)
+	if err != nil {
+		t.Fatalf("first IngestSyncBatch failed: %v", err)
+	}
+	if res1.Received != 3 || res1.Inserted != 3 || res1.Skipped != 0 {
+		t.Fatalf("unexpected res1: %+v", res1)
+	}
+
+	// 2nd Ingestion: duplicate step_1 and msg_01, but new step_3
+	batch2 := &SyncBatch{
+		NodeID: "node_sync_test",
+		Events: []SyncEventItem{
+			{
+				SessionID:           "sess_sync_1",
+				PromptID:            "step_1", // duplicate
+				ProductType:         "antigravity",
+				ModelID:             "gemini-flash",
+				CurrentInputTokens:  1000,
+				CurrentOutputTokens: 200,
+			},
+			{
+				SessionID:           "sess_sync_2",
+				PromptID:            "msg_01", // duplicate
+				ProductType:         "claude_code",
+				ModelID:             "claude-3-7-sonnet",
+				CurrentInputTokens:  2000,
+				CurrentOutputTokens: 300,
+			},
+			{
+				SessionID:           "sess_sync_1",
+				PromptID:            "step_3", // NEW
+				ProductType:         "antigravity",
+				ReportedAt:          "2026-11-16T08:03:00Z",
+				ModelID:             "gemini-flash",
+				CurrentInputTokens:  1500,
+				CurrentOutputTokens: 300,
+				CacheReadTokens:     1000,
+			},
+		},
+	}
+
+	res2, err := store.IngestSyncBatch(ctx, batch2)
+	if err != nil {
+		t.Fatalf("second IngestSyncBatch failed: %v", err)
+	}
+	if res2.Received != 3 || res2.Inserted != 1 || res2.Skipped != 2 {
+		t.Fatalf("unexpected res2: %+v (expected Inserted: 1, Skipped: 2)", res2)
+	}
+
+	// Verify total count in DB is 4
+	var totalEvents int
+	if err := store.DB().QueryRow("SELECT COUNT(*) FROM telemetry_events").Scan(&totalEvents); err != nil {
+		t.Fatal(err)
+	}
+	if totalEvents != 4 {
+		t.Fatalf("expected 4 total events in DB, got %d", totalEvents)
 	}
 }

@@ -162,9 +162,6 @@
             <p class="text-xs text-slate-400 mt-0.5">按日期汇总各模型输入 / 输出 Token 吞吐与占比明细</p>
           </div>
           <div class="flex items-center gap-3">
-            <button id="btn-sync-transcripts" onclick="triggerTranscriptSync()" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 hover:bg-sky-500 text-white flex items-center gap-1.5 transition shadow-sm cursor-pointer" title="扫描并同步本地历史转录日志中的 Token">
-              <span id="sync-icon">🔄</span> 同步本地转录
-            </button>
             <span class="px-3 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 border border-slate-700 mono">📅 近 14 天聚合</span>
             <label class="text-xs text-slate-300 bg-slate-800/90 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2 cursor-pointer select-none">
               <input type="checkbox" id="toggle-zero" onchange="toggleZeroRows()" checked class="rounded bg-slate-900 border-slate-600 text-sky-500">
@@ -314,6 +311,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=0.3.1"></script>
+  <script src="app.js?v=0.3.2"></script>
 </body>
 </html>

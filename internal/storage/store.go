@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -108,6 +109,31 @@ type OverviewData struct {
 	TotalCostUSD             float64       `json:"total_cost_usd"`
 	TodayEventsCount         int64         `json:"today_events_count"`
 	LatestQuotas             []QuotaRecord `json:"latest_quotas"`
+}
+
+type SyncEventItem struct {
+	SessionID           string `json:"session_id"`
+	NodeID              string `json:"node_id"`
+	PromptID            string `json:"prompt_id"`
+	ProductType         string `json:"product_type"`
+	ReportedAt          string `json:"reported_at"`
+	ModelID             string `json:"model_id"`
+	ModelDisplayName    string `json:"model_display_name,omitempty"`
+	CurrentInputTokens  int64  `json:"current_input_tokens"`
+	CurrentOutputTokens int64  `json:"current_output_tokens"`
+	CacheReadTokens     int64  `json:"cache_read_tokens"`
+	CacheCreationTokens int64  `json:"cache_creation_tokens"`
+}
+
+type SyncBatch struct {
+	NodeID string          `json:"node_id"`
+	Events []SyncEventItem `json:"events"`
+}
+
+type SyncBatchResult struct {
+	Received int `json:"received"`
+	Inserted int `json:"inserted"`
+	Skipped  int `json:"skipped"`
 }
 
 func NewStore(dbPath string) (*Store, error) {
@@ -269,6 +295,117 @@ func (s *Store) Ingest(env *model.TelemetryEnvelope) error {
 	}
 
 	return tx.Commit()
+}
+
+// IngestSyncBatch idempotently ingests a batch of historical transcript turn events.
+// Duplicate events matching an existing (session_id, prompt_id) are safely skipped.
+func (s *Store) IngestSyncBatch(ctx context.Context, batch *SyncBatch) (*SyncBatchResult, error) {
+	if batch == nil || len(batch.Events) == 0 {
+		return &SyncBatchResult{}, nil
+	}
+
+	result := &SyncBatchResult{
+		Received: len(batch.Events),
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	checkStmt, err := tx.PrepareContext(ctx, "SELECT id FROM telemetry_events WHERE session_id = ? AND prompt_id = ? LIMIT 1")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare check statement: %w", err)
+	}
+	defer checkStmt.Close()
+
+	insertEventSQL := `
+	INSERT INTO telemetry_events (
+		node_id, session_id, prompt_id, product_type, reported_at,
+		model_id, model_display_name, current_input_tokens, current_output_tokens,
+		cache_read_tokens, cache_creation_tokens, raw_payload
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`
+
+	insertStmt, err := tx.PrepareContext(ctx, insertEventSQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare insert statement: %w", err)
+	}
+	defer insertStmt.Close()
+
+	upsertSessionSQL := `
+	INSERT INTO sessions (
+		session_id, node_id, product_type, started_at, last_active_at
+	) VALUES (?, ?, ?, ?, ?)
+	ON CONFLICT(session_id) DO UPDATE SET
+		node_id = CASE WHEN sessions.node_id = '' OR sessions.node_id = 'unknown_node' THEN excluded.node_id ELSE sessions.node_id END,
+		last_active_at = CASE WHEN excluded.last_active_at > sessions.last_active_at THEN excluded.last_active_at ELSE sessions.last_active_at END;`
+
+	upsertSessionStmt, err := tx.PrepareContext(ctx, upsertSessionSQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare session statement: %w", err)
+	}
+	defer upsertSessionStmt.Close()
+
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
+	nodeID := batch.NodeID
+	if nodeID == "" {
+		nodeID = "unknown_node"
+	}
+	_, _ = tx.ExecContext(ctx, "INSERT INTO nodes (node_id, os_type, first_seen_at, last_seen_at) VALUES (?, 'local', ?, ?) ON CONFLICT(node_id) DO UPDATE SET last_seen_at = excluded.last_seen_at", nodeID, nowStr, nowStr)
+
+	seenSessions := make(map[string]bool)
+
+	for _, e := range batch.Events {
+		eventNodeID := e.NodeID
+		if eventNodeID == "" {
+			eventNodeID = nodeID
+		}
+
+		if e.SessionID != "" && !seenSessions[e.SessionID] {
+			pType := e.ProductType
+			if pType == "" {
+				pType = "antigravity"
+			}
+			repAt := e.ReportedAt
+			if repAt == "" {
+				repAt = nowStr
+			}
+			_, _ = upsertSessionStmt.ExecContext(ctx, e.SessionID, eventNodeID, pType, repAt, repAt)
+			seenSessions[e.SessionID] = true
+		}
+
+		// Idempotency: deduplicate on (session_id, prompt_id)
+		if e.PromptID != "" {
+			var existingID int64
+			if err := checkStmt.QueryRowContext(ctx, e.SessionID, e.PromptID).Scan(&existingID); err == nil {
+				result.Skipped++
+				continue
+			}
+		}
+
+		repAt := e.ReportedAt
+		if repAt == "" {
+			repAt = nowStr
+		}
+		rawPayload := fmt.Sprintf(`{"synced":true,"prompt_id":%q}`, e.PromptID)
+
+		if _, err := insertStmt.ExecContext(ctx,
+			eventNodeID, e.SessionID, e.PromptID, e.ProductType, repAt,
+			e.ModelID, e.ModelDisplayName, e.CurrentInputTokens, e.CurrentOutputTokens,
+			e.CacheReadTokens, e.CacheCreationTokens, rawPayload,
+		); err != nil {
+			return nil, fmt.Errorf("failed to insert sync event: %w", err)
+		}
+
+		result.Inserted++
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit sync batch: %w", err)
+	}
+
+	return result, nil
 }
 
 func (s *Store) GetNodes() ([]NodeRecord, error) {
