@@ -5,12 +5,14 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"statusline/internal/logging"
 	"statusline/internal/server"
 	"statusline/internal/storage"
+	"statusline/internal/updater"
 )
 
 //go:embed web/*
@@ -34,7 +37,55 @@ func init() {
 	}
 }
 
+func printHelp() {
+	displayVer := Version
+	if !strings.HasPrefix(displayVer, "v") && !strings.HasPrefix(displayVer, "V") && displayVer != "dev" {
+		displayVer = "v" + displayVer
+	}
+	fmt.Printf(`statusline-server %s - Centralized telemetry server & real-time web dashboard
+
+Usage:
+  statusline-server [options]          Start the telemetry HTTP server & Web dashboard
+  statusline-server upgrade [options]  Self-upgrade statusline-server to the latest release
+  statusline-server update [options]   Alias for upgrade
+  statusline-server --version, -v      Print version information
+  statusline-server --help, -h         Show this help message
+
+Server Options:
+  -port <port>                         HTTP server listening port (default: 8628)
+  -db <path>                           Path to SQLite database file
+  -config <path>                       Path to server.yaml
+
+Upgrade Options:
+  -check                               Check for new version without downloading or installing
+  -all                                 Also upgrade statusline client if present in same directory
+  -version <tag>                       Target version tag to install (default: latest)
+  -source <auto|server|github>         Update source: auto, server, or github (default: auto)
+  -y, --yes                            Skip confirmation prompts
+`, displayVer)
+}
+
+func runUpgradeCommand(args []string, out io.Writer) error {
+	return updater.RunUpgrade(args, Version, out)
+}
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "upgrade", "update":
+			if err := runUpgradeCommand(os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "Error upgrading statusline-server: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		case "--help", "-h", "-help", "help":
+			printHelp()
+			return
+		case "--version", "-v", "-version", "version":
+			fmt.Printf("statusline-server version %s\n", Version)
+			return
+		}
+	}
 	portFlag := flag.Int("port", 0, "HTTP server listening port (default: 8628)")
 	dbFlag := flag.String("db", "", "Path to SQLite database file")
 	configFlag := flag.String("config", "", "Path to server.yaml")

@@ -149,19 +149,20 @@ go test ./... -v
   - Antigravity: `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`）
   - Claude Code: `~/.claude/settings.json`（及工作区 `.claude/settings.json`）
   支持 `-target [all|agy|claude]` 过滤目标工具。客户端默认在二进制所在目录下检索 `client.yaml`。
-- **客户端一键原地自我升级 (`statusline upgrade` 或 `statusline update`)**:
+- **客户端与服务端一键原地自我升级 (`upgrade` 或 `update`)**:
   ```bash
-  statusline upgrade               # 检查并一键安全升级到最新版
+  statusline upgrade               # 检查并一键安全升级客户端到最新版
   statusline upgrade -check        # 仅检查是否有新版本，不执行下载与安装
   statusline upgrade -all          # 升级 statusline 同时自动升级同目录下的 statusline-server
-  statusline upgrade -version v0.2.0 # 升级或回退至指定版本
+  statusline upgrade -version v0.2.5 # 升级或回退至指定版本
   statusline upgrade -source server # 指定更新源 (auto: 优先服务端回退GitHub, server: 仅服务端, github: 仅GitHub)
   statusline upgrade -y            # 静默升级，跳过终端交互确认
+
+  # 服务端同样原生支持 upgrade 命令：
+  statusline-server upgrade        # 原地自我升级 statusline-server 服务端
+  statusline-server upgrade -all   # 同时升级 statusline-server 及同目录下的 statusline
+  statusline-server upgrade -check # 检查服务端可用更新
   ```
-  自动解析当前运行二进制的绝对路径（原地生效，无需移动），并自动配置：
-  - Antigravity: `~/.gemini/antigravity-cli/settings.json`（或 `~/.gemini/settings.json`）
-  - Claude Code: `~/.claude/settings.json`（及工作区 `.claude/settings.json`）
-  支持 `-target [all|agy|claude]` 过滤目标工具。客户端默认在二进制所在目录下检索 `client.yaml`。
 - **自定义环境变量**:
   - `export STATUSLINE_SERVER_URL="http://127.0.0.1:8628/api/v1/report"`（修改上报地址）
   - `export STATUSLINE_SERVER_URL="off"`（停用遥测上报，纯本地离线渲染）

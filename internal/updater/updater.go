@@ -66,21 +66,39 @@ func ExecuteUpgrade(opts UpgradeOptions, out io.Writer) error {
 		}
 	}
 
+	baseName := strings.ToLower(filepath.Base(execPath))
+	isServer := strings.HasPrefix(baseName, "statusline-server")
+
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+	}
+
+	var primaryName, primaryLabel string
+	var siblingName, siblingLabel string
+	if isServer {
+		primaryName = "statusline-server" + ext
+		primaryLabel = "statusline-server"
+		siblingName = "statusline" + ext
+		siblingLabel = "statusline"
+	} else {
+		primaryName = "statusline" + ext
+		primaryLabel = "statusline"
+		siblingName = "statusline-server" + ext
+		siblingLabel = "statusline-server"
+	}
+
 	CleanupOldExecutables(execPath)
 
-	fmt.Fprintf(out, "[1/4] 当前环境: statusline %s (%s/%s)\n", opts.CurrentVer, runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(out, "[1/4] 当前环境: %s %s (%s/%s)\n", primaryLabel, opts.CurrentVer, runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(out, "      可执行文件: %s\n", execPath)
 
 	execDir := filepath.Dir(execPath)
-	serverExeName := "statusline-server"
-	if runtime.GOOS == "windows" {
-		serverExeName += ".exe"
-	}
-	serverPath := filepath.Join(execDir, serverExeName)
-	hasServerInSameDir := false
-	if _, err := os.Stat(serverPath); err == nil {
-		hasServerInSameDir = true
-		fmt.Fprintf(out, "      关联组件: 检测到同目录下存在 %s\n", serverExeName)
+	siblingPath := filepath.Join(execDir, siblingName)
+	hasSiblingInSameDir := false
+	if _, err := os.Stat(siblingPath); err == nil {
+		hasSiblingInSameDir = true
+		fmt.Fprintf(out, "      关联组件: 检测到同目录下存在 %s\n", siblingName)
 	}
 
 	// 2. Resolve update source
@@ -88,6 +106,11 @@ func ExecuteUpgrade(opts UpgradeOptions, out io.Writer) error {
 	cfg := opts.ClientConfig
 	if cfg == nil {
 		cfg, _ = config.LoadClientConfig("")
+	}
+	if isServer && cfg != nil && cfg.Report.Endpoint == "http://127.0.0.1:8628/api/v1/report" {
+		if serverCfg, sErr := config.LoadServerConfig(""); sErr == nil && serverCfg != nil && serverCfg.Server.Port > 0 && serverCfg.Server.Port != 8628 {
+			cfg.Report.Endpoint = fmt.Sprintf("http://127.0.0.1:%d/api/v1/report", serverCfg.Server.Port)
+		}
 	}
 	src, err := ResolveSource(cfg, opts.ForcedSource)
 	if err != nil {
@@ -176,39 +199,39 @@ func ExecuteUpgrade(opts UpgradeOptions, out io.Writer) error {
 		fmt.Fprintf(out, "      ✓ 校验通过 (%s)\n", expectedHash[:12])
 	}
 
-	// Extract and atomically replace statusline
-	clientBinaryName := "statusline"
-	if runtime.GOOS == "windows" {
-		clientBinaryName += ".exe"
-	}
-	tmpClient := filepath.Join(execDir, ".statusline.new.tmp")
-	defer os.Remove(tmpClient)
+	// Extract and atomically replace primary binary
+	tmpPrimary := filepath.Join(execDir, fmt.Sprintf(".%s.new.tmp", primaryLabel))
+	defer os.Remove(tmpPrimary)
 
-	if err := ExtractBinaryFromArchive(tmpArchive, clientBinaryName, tmpClient); err != nil {
-		return fmt.Errorf("解压客户端二进制失败: %w", err)
+	if err := ExtractBinaryFromArchive(tmpArchive, primaryName, tmpPrimary); err != nil {
+		return fmt.Errorf("解压 %s 二进制失败: %w", primaryLabel, err)
 	}
 
-	if err := ReplaceExecutable(execPath, tmpClient); err != nil {
-		return fmt.Errorf("替换 statusline 失败: %w", err)
+	if err := ReplaceExecutable(execPath, tmpPrimary); err != nil {
+		return fmt.Errorf("替换 %s 失败: %w", primaryLabel, err)
 	}
-	fmt.Fprintf(out, "      ✓ statusline 已成功替换为 %s\n", rel.Version)
+	fmt.Fprintf(out, "      ✓ %s 已成功替换为 %s\n", primaryLabel, rel.Version)
 
-	// If -all and statusline-server exists in same directory, upgrade it too
-	if opts.UpgradeAll && hasServerInSameDir {
-		tmpServer := filepath.Join(execDir, ".statusline-server.new.tmp")
-		defer os.Remove(tmpServer)
+	// If -all and sibling exists in same directory, upgrade it too
+	if opts.UpgradeAll && hasSiblingInSameDir {
+		tmpSibling := filepath.Join(execDir, fmt.Sprintf(".%s.new.tmp", siblingLabel))
+		defer os.Remove(tmpSibling)
 
-		if err := ExtractBinaryFromArchive(tmpArchive, serverExeName, tmpServer); err == nil {
-			if sErr := ReplaceExecutable(serverPath, tmpServer); sErr == nil {
-				fmt.Fprintf(out, "      ✓ statusline-server 已同时成功替换为 %s\n", rel.Version)
+		if err := ExtractBinaryFromArchive(tmpArchive, siblingName, tmpSibling); err == nil {
+			if sErr := ReplaceExecutable(siblingPath, tmpSibling); sErr == nil {
+				fmt.Fprintf(out, "      ✓ %s 已同时成功替换为 %s\n", siblingLabel, rel.Version)
 			} else {
-				fmt.Fprintf(out, "      ! 替换 statusline-server 失败: %v\n", sErr)
+				fmt.Fprintf(out, "      ! 替换 %s 失败: %v\n", siblingLabel, sErr)
 			}
 		} else {
-			fmt.Fprintf(out, "      ! 压缩包中未找到 %s: %v\n", serverExeName, err)
+			fmt.Fprintf(out, "      ! 压缩包中未找到 %s: %v\n", siblingName, err)
 		}
-	} else if hasServerInSameDir && !opts.UpgradeAll {
-		fmt.Fprintf(out, "      (提示: 同目录下存在 %s，如需一同升级请使用 statusline upgrade --all)\n", serverExeName)
+	} else if hasSiblingInSameDir && !opts.UpgradeAll {
+		fmt.Fprintf(out, "      (提示: 同目录下存在 %s，如需一同升级请使用 %s upgrade --all)\n", siblingName, primaryLabel)
+	}
+
+	if isServer {
+		fmt.Fprintf(out, "      (提示: 若 %s 作为系统常驻服务运行，请执行相应命令重启服务使新版本生效，如: systemctl restart %s)\n", primaryLabel, primaryLabel)
 	}
 
 	fmt.Fprintf(out, "✓ 升级全部完成！新版本已即时生效。\n")
