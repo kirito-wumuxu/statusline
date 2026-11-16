@@ -301,6 +301,45 @@ body {
   border-color: rgba(245, 158, 11, 0.35);
 }
 
+/* 方案 A 底部双层微对比进度条 */
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.bar-track {
+  width: 100%;
+  background: #1b2434;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.bar-cap {
+  height: 5px;
+}
+
+.bar-time {
+  height: 2.5px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.3s ease;
+}
+
+.legend-tick {
+  width: 10px;
+  height: 3px;
+  background: #ffffff;
+  border-radius: 2px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
 .pill-row {
   display: flex;
   justify-content: space-between;

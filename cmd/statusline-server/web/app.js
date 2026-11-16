@@ -617,28 +617,35 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
         tagHtml = `<span class="warn-tag animate-pulse">● 低配额预警</span>`;
       }
 
-      // 方案 B：主容量环 + 内侧贴边「伴随细时间轨」
-      // 5h 组：外主环 r=86 (宽9) + 内贴边时间细环 r=77 (宽2.5)
-      // 7d 组：外主环 r=62 (宽9) + 内贴边时间细环 r=53 (宽2.5)
+      // 方案 A (方案 1)：环上「时间刻度游标」 + 底部「双层对比微进度条」
+      // 5h 组：外环 R=84, stroke-width=12; 时间游标角度 a1
+      // 7d 组：内环 R=62, stroke-width=11; 时间游标角度 a2
+      const a1 = (shortTimePct / 100) * 360;
+      const a2 = (weeklyTimePct / 100) * 360;
+
       const svgHtml = `
         <svg viewBox="0 0 200 200" width="100%" height="100%">
-          <!-- 5h 外层主容量粗环 (R=86, 宽9) -->
-          <circle cx="100" cy="100" r="86" fill="none" stroke="#182232" stroke-width="9"/>
-          <circle class="ring-arc" cx="100" cy="100" r="86" fill="none" stroke="${shortColor}" stroke-width="9"
-            stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(86, shortPct)}/>
-          <!-- 5h 伴随时间细环 (R=77, 宽2.5) -->
-          <circle cx="100" cy="100" r="77" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2.5"/>
-          <circle class="ring-arc" cx="100" cy="100" r="77" fill="none" stroke="rgba(241,245,249,0.55)" stroke-width="2.5"
-            stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(77, shortTimePct)}/>
+          <!-- 5h 外层轨道与容量弧 (R=84, 宽12) -->
+          <circle cx="100" cy="100" r="84" fill="none" stroke="#182232" stroke-width="12"/>
+          <circle class="ring-arc" cx="100" cy="100" r="84" fill="none" stroke="${shortColor}" stroke-width="12"
+            stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(84, shortPct)}/>
 
-          <!-- 7d 内层主容量粗环 (R=62, 宽9) -->
-          <circle cx="100" cy="100" r="62" fill="none" stroke="#182232" stroke-width="9"/>
-          <circle class="ring-arc" cx="100" cy="100" r="62" fill="none" stroke="${weeklyColor}" stroke-width="9"
+          <!-- 7d 内层轨道与容量弧 (R=62, 宽11) -->
+          <circle cx="100" cy="100" r="62" fill="none" stroke="#182232" stroke-width="11"/>
+          <circle class="ring-arc" cx="100" cy="100" r="62" fill="none" stroke="${weeklyColor}" stroke-width="11"
             stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(62, weeklyPct)}/>
-          <!-- 7d 伴随时间细环 (R=53, 宽2.5) -->
-          <circle cx="100" cy="100" r="53" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2.5"/>
-          <circle class="ring-arc" cx="100" cy="100" r="53" fill="none" stroke="rgba(241,245,249,0.45)" stroke-width="2.5"
-            stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(53, weeklyTimePct)}/>
+
+          <!-- 5h 时间游标刻度 (带深色描边防混淆) -->
+          <g transform="rotate(${a1} 100 100)">
+            <line x1="100" y1="8" x2="100" y2="24" stroke="#0d121b" stroke-width="5.5" stroke-linecap="round"/>
+            <line x1="100" y1="9" x2="100" y2="23" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+          </g>
+
+          <!-- 7d 时间游标刻度 (带深色描边防混淆) -->
+          <g transform="rotate(${a2} 100 100)">
+            <line x1="100" y1="30" x2="100" y2="46" stroke="#0d121b" stroke-width="5.5" stroke-linecap="round"/>
+            <line x1="100" y1="31" x2="100" y2="45" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+          </g>
         </svg>
       `;
 
@@ -649,7 +656,7 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
             ${tagHtml}
           </div>
 
-          <!-- 方案 B：双维度侧环 SVG -->
+          <!-- 方案 A：环上时间游标 SVG -->
           <div class="quota-ring-svg-wrap">
             ${svgHtml}
             <div class="ring-center">
@@ -661,18 +668,26 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
 
           <div class="ring-divider"></div>
 
-          <!-- 双维度时间详情药丸 -->
+          <!-- 双维度时间详情药丸 + 方案 A 底部双层微对比进度条 -->
           <div class="quota-pills">
             <div class="quota-pill ${isShortWarn ? 'pill-warn' : ''}">
               <div class="pill-row">
                 <div class="pill-left"><span class="pill-dot" style="background:${shortColor}"></span>短期 (${escapeHtml(shortWinStr)})</div>
                 <div class="pill-right">${shortPct}% · ${shortTimeStr} <span class="muted">(余${shortTimePct}%)</span></div>
               </div>
+              <div class="bars">
+                <div class="bar-track bar-cap" title="短期余量: ${shortPct}%"><div class="bar-fill" style="width:${shortPct}%;background:${shortColor}"></div></div>
+                <div class="bar-track bar-time" title="周期剩余时间: ${shortTimePct}%"><div class="bar-fill" style="width:${shortTimePct}%;background:rgba(241,245,249,0.45)"></div></div>
+              </div>
             </div>
             <div class="quota-pill ${isWeeklyWarn ? 'pill-warn' : ''}">
               <div class="pill-row">
                 <div class="pill-left"><span class="pill-dot" style="background:${weeklyColor}"></span>周度 (${escapeHtml(weeklyWinStr)})</div>
                 <div class="pill-right">${weeklyPct}% · ${weeklyTimeStr} <span class="muted">(余${weeklyTimePct}%)</span></div>
+              </div>
+              <div class="bars">
+                <div class="bar-track bar-cap" title="周度余量: ${weeklyPct}%"><div class="bar-fill" style="width:${weeklyPct}%;background:${weeklyColor}"></div></div>
+                <div class="bar-track bar-time" title="周期剩余时间: ${weeklyTimePct}%"><div class="bar-fill" style="width:${weeklyTimePct}%;background:rgba(241,245,249,0.45)"></div></div>
               </div>
             </div>
           </div>
