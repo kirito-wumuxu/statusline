@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>StatusLine 遥测监控 - 项目聚合版</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23131a26'/%3E%3Cpath d='M16 6 L26 16 L16 26 L6 16 Z' fill='none' stroke='%2338bdf8' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%2310b981'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=0.2.0">
+  <link rel="stylesheet" href="style.css?v=0.4.2">
 </head>
 <body class="p-4 xl:p-6 min-h-screen flex flex-col">
 
@@ -93,20 +93,20 @@
       </div>
       
       <div class="flex items-center gap-4 text-xs">
-        <span class="flex items-center gap-1.5 text-slate-300"><i class="w-2.5 h-2.5 rounded-full bg-sky-400"></i>Gemini 配额</span>
-        <span class="flex items-center gap-1.5 text-slate-300"><i class="w-2.5 h-2.5 rounded-full bg-emerald-400"></i>Claude 充足</span>
-        <span class="flex items-center gap-1.5 text-amber-400"><i class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></i>低配额预警 (&lt;20%)</span>
+        <span class="flex items-center gap-1.5 text-slate-300"><i class="w-2.5 h-2.5 rounded-full bg-sky-400"></i>主粗环 (容量)</span>
+        <span class="flex items-center gap-1.5 text-slate-300"><span class="inline-block w-3.5 h-[2.5px] bg-slate-300/60 rounded"></span>贴边细环 (时间轨)</span>
+        <span class="flex items-center gap-1.5 text-amber-400"><i class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></i>消耗过快 / 低配额预警</span>
       </div>
     </div>
 
-    <!-- 3. TAB 1: 账号模型配额池 (208px 巨型同心双环) -->
+    <!-- 3. TAB 1: 账号模型配额池 (方案 B：主容量环 + 贴边细时间轨) -->
     <div id="tab-quota" class="flex-1 flex flex-col">
       <section class="card-bg p-6 rounded-2xl flex-1 flex flex-col justify-between space-y-6">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h2 class="text-lg font-bold text-white flex items-center gap-3">
               账号模型配额池实时看板
-              <span class="text-xs font-normal px-2.5 py-1 rounded-md bg-slate-800 text-slate-300">外环：短期窗口 (5小时) · 内环：周度窗口 (7天)</span>
+              <span class="text-xs font-normal px-2.5 py-1 rounded-md bg-slate-800 text-slate-300">外圈：短期 (5h) · 内圈：周度 (7d) · 贴边细环：周期时间比例（主粗环长于细环即消耗节奏安全）</span>
             </h2>
           </div>
           <div class="flex items-center gap-3 text-xs text-slate-400 mono">
@@ -153,42 +153,135 @@
       </section>
     </div>
 
-    <!-- 5. TAB 3: 每日各模型 Token 消耗 -->
+    <!-- 5. TAB 3: 每日各模型 Token 消耗 (叠加柱状图 + 时间/模型筛选 + 明细表格) -->
     <div id="tab-tokens" class="hidden">
-      <section class="card-bg p-6 rounded-2xl">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+      <section class="card-bg p-6 rounded-2xl space-y-6">
+        <!-- 顶部标题与快速统计指标 -->
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
           <div>
-            <h2 class="text-lg font-bold text-white">每日各模型 Token 消耗明细</h2>
-            <p class="text-xs text-slate-400 mt-0.5">按日期汇总各模型输入 / 输出 Token 吞吐与占比明细</p>
+            <h2 class="text-lg font-bold text-white flex items-center gap-3">
+              📊 每日各模型 Token 消耗分析
+              <span class="text-xs font-normal px-2.5 py-1 rounded-md bg-slate-800 text-slate-300">叠加柱状图 · 双维度筛选</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-1">按日期与模型聚合统计真实吞吐（输入 ↑ / 输出 ↓ / 缓存 ⚡）及每日构成占比</p>
           </div>
-          <div class="flex items-center gap-3">
-            <span class="px-3 py-1 text-xs rounded-lg bg-slate-800 text-slate-300 border border-slate-700 mono">📅 近 14 天聚合</span>
-            <label class="text-xs text-slate-300 bg-slate-800/90 px-3.5 py-2 rounded-lg border border-slate-700 flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" id="toggle-zero" onchange="toggleZeroRows()" checked class="rounded bg-slate-900 border-slate-600 text-sky-500">
-              显示 0 消耗模型行
-            </label>
+          
+          <!-- 核心指标摘要卡 -->
+          <div class="flex flex-wrap items-center gap-3 text-xs">
+            <div class="bg-slate-900/90 border border-slate-800 px-3.5 py-2 rounded-xl flex flex-col">
+              <span class="text-[11px] text-slate-400">区间总吞吐</span>
+              <span id="range-total-tokens" class="text-base font-bold text-sky-400 mono">--</span>
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 px-3.5 py-2 rounded-xl flex flex-col">
+              <span class="text-[11px] text-slate-400">区间日均</span>
+              <span id="range-avg-tokens" class="text-base font-bold text-emerald-400 mono">--</span>
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 px-3.5 py-2 rounded-xl flex flex-col">
+              <span class="text-[11px] text-slate-400">单日峰值</span>
+              <span id="range-peak-tokens" class="text-base font-bold text-amber-400 mono">--</span>
+            </div>
           </div>
         </div>
 
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse text-xs" id="daily-tokens-table">
-            <thead>
-              <tr class="border-b border-slate-800 text-slate-400 bg-slate-900/40">
-                <th class="py-3 px-4" style="width: 140px;">日期</th>
-                <th class="py-3 px-4" style="width: 220px;">模型名称</th>
-                <th class="py-3 px-4" style="width: 130px;">输入 Token (↑)</th>
-                <th class="py-3 px-4" style="width: 130px;">输出 Token (↓)</th>
-                <th class="py-3 px-4" style="width: 140px;">缓存命中 (⚡ Cache)</th>
-                <th class="py-3 px-4" style="width: 140px;">总计 Token</th>
-                <th class="py-3 px-4 w-64">消耗占比</th>
-              </tr>
-            </thead>
-            <tbody id="daily-tokens-tbody" class="divide-y divide-slate-800/60 mono">
-              <tr>
-                <td colspan="7" class="py-8 text-center text-slate-500">数据加载中...</td>
-              </tr>
-            </tbody>
-          </table>
+        <!-- 筛选控制工具栏 -->
+        <div class="bg-[#0c121d] border border-slate-800/80 rounded-xl p-4 space-y-3.5">
+          <!-- 第一行：时间范围快捷按钮 + 自定义起止日期 -->
+          <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-slate-400 font-semibold flex items-center gap-1.5">
+                📅 时间范围:
+              </span>
+              <div class="flex rounded-lg bg-slate-900/90 p-0.5 border border-slate-800" id="time-range-buttons">
+                <button type="button" class="time-range-btn px-3 py-1.5 rounded-md text-xs" data-days="7" onclick="setTimeRange(7)">近 7 天</button>
+                <button type="button" class="time-range-btn active px-3 py-1.5 rounded-md text-xs" data-days="14" onclick="setTimeRange(14)">近 14 天</button>
+                <button type="button" class="time-range-btn px-3 py-1.5 rounded-md text-xs" data-days="30" onclick="setTimeRange(30)">近 30 天</button>
+                <button type="button" class="time-range-btn px-3 py-1.5 rounded-md text-xs" data-days="90" onclick="setTimeRange(90)">全部 (90天)</button>
+              </div>
+            </div>
+
+            <!-- 自定义起止日期选择器 -->
+            <div class="flex items-center gap-2">
+              <span class="text-slate-400 text-xs">自定义:</span>
+              <input type="date" id="date-filter-start" class="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1 text-slate-200 text-xs mono focus:border-sky-500 focus:outline-none" onchange="handleCustomDateChange()">
+              <span class="text-slate-500">至</span>
+              <input type="date" id="date-filter-end" class="bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1 text-slate-200 text-xs mono focus:border-sky-500 focus:outline-none" onchange="handleCustomDateChange()">
+              <button onclick="resetDateRangeFilter()" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition" title="重置时间为近 14 天">重置</button>
+            </div>
+          </div>
+
+          <!-- 第二行：模型多选 Chips 与全选控制 -->
+          <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/60 text-xs">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-slate-400 font-semibold flex items-center gap-1.5 shrink-0">
+                🤖 模型筛选:
+              </span>
+              <div id="model-filter-chips" class="flex flex-wrap gap-1.5">
+                <!-- 动态生成模型 Chips -->
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2.5 text-xs shrink-0">
+              <button onclick="selectAllModels(true)" class="text-sky-400 hover:underline">全选</button>
+              <span class="text-slate-600">|</span>
+              <button onclick="selectAllModels(false)" class="text-slate-400 hover:underline">清空</button>
+              <span class="text-slate-600">|</span>
+              <label class="text-xs text-slate-300 flex items-center gap-1.5 cursor-pointer select-none">
+                <input type="checkbox" id="toggle-zero" onchange="toggleZeroRows()" checked class="rounded bg-slate-900 border-slate-600 text-sky-500">
+                显示 0 消耗模型行
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 叠加柱状图展示卡片 -->
+        <div class="bg-[#080d16] border border-slate-800/90 rounded-xl p-4 relative">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 text-xs text-slate-400">
+            <div class="flex items-center gap-2 font-semibold text-slate-300">
+              <span>📈 每日模型堆叠趋势 (Stacked Bar Chart)</span>
+              <span class="text-[11px] text-slate-500 font-normal hidden md:inline">柱高代表当天总吞吐，颜色区块代表各模型消耗占比</span>
+            </div>
+            <div id="chart-legend-summary" class="flex flex-wrap gap-2 text-[11px] mono">
+              <!-- 动态图例与总计 -->
+            </div>
+          </div>
+
+          <!-- SVG 叠加柱状图容器 -->
+          <div id="stacked-bar-chart-wrap" class="w-full overflow-x-auto">
+            <div id="stacked-bar-chart-container" class="min-w-[680px] h-[320px] relative">
+              <!-- 动态绘制 SVG Stacked Bar Chart -->
+            </div>
+          </div>
+
+          <!-- 悬浮交互 Tooltip 容器 -->
+          <div id="chart-tooltip" class="chart-tooltip hidden"></div>
+        </div>
+
+        <!-- 每日明细表格卡片 -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-xs text-slate-400 px-1">
+            <span class="font-semibold text-slate-300">📋 每日明细数据表</span>
+            <span id="table-filter-stats" class="mono text-slate-400">显示 0 天 · 0 条模型记录</span>
+          </div>
+          <div class="overflow-x-auto border border-slate-800/80 rounded-xl bg-[#080c14]">
+            <table class="w-full text-left border-collapse text-xs" id="daily-tokens-table">
+              <thead>
+                <tr class="border-b border-slate-800 text-slate-400 bg-slate-900/60">
+                  <th class="py-3 px-4" style="width: 140px;">日期</th>
+                  <th class="py-3 px-4" style="width: 220px;">模型名称</th>
+                  <th class="py-3 px-4" style="width: 130px;">输入 Token (↑)</th>
+                  <th class="py-3 px-4" style="width: 130px;">输出 Token (↓)</th>
+                  <th class="py-3 px-4" style="width: 140px;">缓存读取 (⚡ Cache)</th>
+                  <th class="py-3 px-4" style="width: 140px;">总计 Token</th>
+                  <th class="py-3 px-4 w-64">当天消耗占比</th>
+                </tr>
+              </thead>
+              <tbody id="daily-tokens-tbody" class="divide-y divide-slate-800/60 mono">
+                <tr>
+                  <td colspan="7" class="py-8 text-center text-slate-500">数据加载中...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
     </div>
@@ -311,6 +404,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=0.3.2"></script>
+  <script src="app.js?v=0.4.2"></script>
 </body>
 </html>

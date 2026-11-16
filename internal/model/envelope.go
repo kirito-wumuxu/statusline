@@ -348,9 +348,10 @@ type AccountSummary struct {
 }
 
 type TokensSummary struct {
-	TotalInputTokens  int64 `json:"total_input_tokens"`
-	TotalOutputTokens int64 `json:"total_output_tokens"`
-	TotalTokens       int64 `json:"total_tokens"`
+	TotalInputTokens     int64 `json:"total_input_tokens"`
+	TotalOutputTokens    int64 `json:"total_output_tokens"`
+	TotalCacheReadTokens int64 `json:"total_cache_read_tokens,omitempty"`
+	TotalTokens          int64 `json:"total_tokens"`
 }
 
 type ContextSummary struct {

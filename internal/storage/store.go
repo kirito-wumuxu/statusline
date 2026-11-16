@@ -47,10 +47,12 @@ type SessionRecord struct {
 	GitRepoName        string  `json:"git_repo_name,omitempty"`
 	GitBranch          string  `json:"git_branch,omitempty"`
 	GitWorktree        string  `json:"git_worktree,omitempty"`
-	LatestModelID      string  `json:"latest_model_id"`
-	TotalInputTokens   int64   `json:"total_input_tokens"`
-	TotalOutputTokens  int64   `json:"total_output_tokens"`
-	ContextUsedPct     float64 `json:"context_used_pct"`
+	LatestModelID        string  `json:"latest_model_id"`
+	TotalInputTokens     int64   `json:"total_input_tokens"`
+	TotalOutputTokens    int64   `json:"total_output_tokens"`
+	TotalCacheReadTokens int64   `json:"total_cache_read_tokens"`
+	TotalTokens          int64   `json:"total_tokens"`
+	ContextUsedPct       float64 `json:"context_used_pct"`
 	TotalCostUSD       float64 `json:"total_cost_usd"`
 	TotalDurationMS    int64   `json:"total_duration_ms"`
 	TotalLinesAdded    int     `json:"total_lines_added"`
@@ -443,22 +445,35 @@ func (s *Store) GetSessions(nodeID string, limit int) ([]SessionRecord, error) {
 	}
 
 	query := `
-	SELECT session_id, node_id, product_type, COALESCE(conversation_id, ''), COALESCE(session_name, ''),
-	       COALESCE(account_email, ''), COALESCE(plan_tier, ''), COALESCE(tool_version, ''),
-	       cwd, COALESCE(project_dir, ''), COALESCE(transcript_path, ''),
-	       COALESCE(git_repo_host, ''), COALESCE(git_repo_owner, ''), COALESCE(git_repo_name, ''),
-	       COALESCE(git_branch, ''), COALESCE(git_worktree, ''),
-	       COALESCE(latest_model_id, ''), total_input_tokens, total_output_tokens, context_used_pct,
-	       total_cost_usd, total_duration_ms, total_lines_added, total_lines_removed,
-	       started_at, last_active_at
-	FROM sessions `
+	SELECT s.session_id, s.node_id, s.product_type, COALESCE(s.conversation_id, ''), COALESCE(s.session_name, ''),
+	       COALESCE(s.account_email, ''), COALESCE(s.plan_tier, ''), COALESCE(s.tool_version, ''),
+	       s.cwd, COALESCE(s.project_dir, ''), COALESCE(s.transcript_path, ''),
+	       COALESCE(s.git_repo_host, ''), COALESCE(s.git_repo_owner, ''), COALESCE(s.git_repo_name, ''),
+	       COALESCE(s.git_branch, ''), COALESCE(s.git_worktree, ''),
+	       COALESCE(s.latest_model_id, ''),
+	       COALESCE(e.sum_in, s.total_input_tokens, 0) AS total_input_tokens,
+	       COALESCE(e.sum_out, s.total_output_tokens, 0) AS total_output_tokens,
+	       COALESCE(e.sum_cache, 0) AS total_cache_read_tokens,
+	       (COALESCE(e.sum_in, s.total_input_tokens, 0) + COALESCE(e.sum_out, s.total_output_tokens, 0) + COALESCE(e.sum_cache, 0)) AS total_tokens,
+	       s.context_used_pct,
+	       s.total_cost_usd, s.total_duration_ms, s.total_lines_added, s.total_lines_removed,
+	       s.started_at, s.last_active_at
+	FROM sessions s
+	LEFT JOIN (
+		SELECT session_id,
+		       SUM(current_input_tokens) AS sum_in,
+		       SUM(current_output_tokens) AS sum_out,
+		       SUM(cache_read_tokens) AS sum_cache
+		FROM telemetry_events
+		GROUP BY session_id
+	) e ON s.session_id = e.session_id `
 
 	var args []interface{}
 	if nodeID != "" {
-		query += "WHERE node_id = ? "
+		query += "WHERE s.node_id = ? "
 		args = append(args, nodeID)
 	}
-	query += "ORDER BY last_active_at DESC LIMIT ?"
+	query += "ORDER BY s.last_active_at DESC LIMIT ?"
 	args = append(args, limit)
 
 	rows, err := s.db.Query(query, args...)
@@ -476,7 +491,8 @@ func (s *Store) GetSessions(nodeID string, limit int) ([]SessionRecord, error) {
 			&r.CWD, &r.ProjectDir, &r.TranscriptPath,
 			&r.GitRepoHost, &r.GitRepoOwner, &r.GitRepoName,
 			&r.GitBranch, &r.GitWorktree,
-			&r.LatestModelID, &r.TotalInputTokens, &r.TotalOutputTokens, &r.ContextUsedPct,
+			&r.LatestModelID, &r.TotalInputTokens, &r.TotalOutputTokens, &r.TotalCacheReadTokens, &r.TotalTokens,
+			&r.ContextUsedPct,
 			&r.TotalCostUSD, &r.TotalDurationMS, &r.TotalLinesAdded, &r.TotalLinesRemoved,
 			&r.StartedAt, &r.LastActiveAt,
 		); err != nil {

@@ -156,6 +156,42 @@ function formatDurationCompact(seconds) {
   return `${minutes}m`;
 }
 
+// 方案 B：弧长计算 (返回 SVG stroke-dasharray="len circumference")
+function arcAttrs(r, pct) {
+  const c = 2 * Math.PI * r;
+  const clamped = Math.min(100, Math.max(0, Number(pct) || 0));
+  const len = (clamped / 100) * c;
+  return `stroke-dasharray="${len.toFixed(2)} ${c.toFixed(2)}"`;
+}
+
+// 解析配额周期的总秒数 (5h: 18000s, 7d: 604800s, 24h: 86400s)
+function getWindowTotalSeconds(item, fallbackWindow) {
+  if (!item) {
+    return fallbackWindow === '7d' ? 7 * 86400 : 5 * 3600;
+  }
+  const win = (item.window_label || '').toLowerCase();
+  const key = (item.quota_key || '').toLowerCase();
+  if (win.includes('5h') || key.includes('-5h') || key.includes('-short')) return 5 * 3600;
+  if (win.includes('7d') || win.includes('week') || key.includes('-weekly')) return 7 * 86400;
+  if (win.includes('24h') || win.includes('1d') || key.includes('-daily')) return 24 * 3600;
+  if (win.includes('30d') || win.includes('month') || key.includes('-monthly')) return 30 * 86400;
+
+  const matchH = win.match(/(\d+)h/);
+  if (matchH) return parseInt(matchH[1], 10) * 3600;
+  const matchD = win.match(/(\d+)d/);
+  if (matchD) return parseInt(matchD[1], 10) * 86400;
+
+  const resetSec = Number(item.reset_in_seconds || 0);
+  return resetSec > 86400 ? 7 * 86400 : 5 * 3600;
+}
+
+// 计算当前周期内的剩余时间百分比 (剩余秒数 / 周期总秒数 * 100)
+function calculateTimeRemainingPct(resetSec, totalWinSec) {
+  if (!resetSec || resetSec <= 0 || !totalWinSec || totalWinSec <= 0) return 0;
+  const pct = (resetSec / totalWinSec) * 100;
+  return Math.round(Math.min(100, Math.max(0, pct)));
+}
+
 function splitQuotaKeySuffix(key) {
   const lower = (key || '').toLowerCase();
   const suffixes = [
@@ -266,11 +302,42 @@ async function loadAliases() {
 }
 
 function formatTokens(n) {
-  if (!n || n < 0) return '0';
-  if (n < 1000) return String(n);
-  if (n < 10000) return (n / 1000).toFixed(1) + 'k';
-  if (n < 1000000) return Math.round(n / 1000) + 'k';
-  return (n / 1000000).toFixed(2) + 'M';
+  if (!n || n <= 0) return '0';
+  const num = Number(n);
+  if (isNaN(num) || num <= 0) return '0';
+  if (num < 1000) return String(Math.round(num));
+
+  const units = [
+    { val: 1e12, suffix: 'T' },
+    { val: 1e9,  suffix: 'B' },
+    { val: 1e6,  suffix: 'M' },
+    { val: 1e3,  suffix: 'k' }
+  ];
+
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (num >= u.val * 0.9995) {
+      let v = num / u.val;
+      let formatted;
+      if (v < 10) {
+        formatted = v.toFixed(2);
+      } else if (v < 100) {
+        formatted = v.toFixed(1);
+      } else {
+        formatted = Math.round(v).toString();
+      }
+      formatted = formatted.replace(/\.?0+$/, '');
+      if (parseFloat(formatted) >= 1000 && i > 0) {
+        const nextU = units[i - 1];
+        let nextV = num / nextU.val;
+        let nextFormatted = nextV < 10 ? nextV.toFixed(2) : (nextV < 100 ? nextV.toFixed(1) : Math.round(nextV).toString());
+        nextFormatted = nextFormatted.replace(/\.?0+$/, '');
+        return nextFormatted + nextU.suffix;
+      }
+      return formatted + u.suffix;
+    }
+  }
+  return String(Math.round(num));
 }
 
 function formatUSD(n) {
@@ -478,87 +545,135 @@ function renderAccountQuotas(groupedAccounts, forceRedraw = false) {
 
       const shortFraction = shortItem ? Number(shortItem.remaining_fraction || 0) : 1;
       const shortReset = shortItem ? Number(shortItem.reset_in_seconds || 0) : 0;
-      const shortPct = Math.round(shortFraction * 100);
+      const shortPct = Math.round(Math.min(100, Math.max(0, shortFraction * 100)));
 
       const weeklyFraction = weeklyItem ? Number(weeklyItem.remaining_fraction || 0) : 1;
       const weeklyReset = weeklyItem ? Number(weeklyItem.reset_in_seconds || 0) : 0;
-      const weeklyPct = Math.round(weeklyFraction * 100);
+      const weeklyPct = Math.round(Math.min(100, Math.max(0, weeklyFraction * 100)));
 
-      const hasWarning = shortPct < 20 || weeklyPct < 20;
+      // 周期总时长 (秒) 与剩余时间百分比 (余%)
+      const shortTotalSec = getWindowTotalSeconds(shortItem, '5h');
+      const weeklyTotalSec = getWindowTotalSeconds(weeklyItem, '7d');
+      const shortTimePct = calculateTimeRemainingPct(shortReset, shortTotalSec);
+      const weeklyTimePct = calculateTimeRemainingPct(weeklyReset, weeklyTotalSec);
+
+      // 倒计时与窗口展示文案
+      const shortTimeStr = shortReset > 0 ? (shortItem && shortItem.reset_countdown ? shortItem.reset_countdown : formatDurationCompact(shortReset)) : '已重置';
+      const weeklyTimeStr = weeklyReset > 0 ? (weeklyItem && weeklyItem.reset_countdown ? weeklyItem.reset_countdown : formatDurationCompact(weeklyReset)) : '已重置';
+      const shortWinStr = shortItem && shortItem.window_label ? shortItem.window_label : '5h';
+      const weeklyWinStr = weeklyItem && weeklyItem.window_label ? weeklyItem.window_label : '7d';
+
+      // 预警判定：消耗过快预警 (容量余量低于时间余量) 与 低配额预警 (<20%)
+      const isShortFastBurn = shortPct < shortTimePct && (shortPct < 50 || shortTimePct > 20);
+      const isWeeklyFastBurn = weeklyPct < weeklyTimePct && (weeklyPct < 50 || weeklyTimePct > 20);
+      const isFastBurn = isShortFastBurn || isWeeklyFastBurn;
+      const isShortLow = shortPct < 20;
+      const isWeeklyLow = weeklyPct < 20;
+      const isLowQuota = isShortLow || isWeeklyLow;
       const isCritical = shortPct < 10 || weeklyPct < 10;
+      const isWarn = isLowQuota || isFastBurn;
 
-      // Concentric Rings Math (ViewBox: 0 0 120 120)
-      // Outer Ring: R=52, Circumference = 2 * PI * 52 ≈ 326.7
-      const C1 = 326.7;
-      const offset1 = (C1 * (1 - Math.min(1, Math.max(0, shortFraction)))).toFixed(1);
-      
-      // Inner Ring: R=38, Circumference = 2 * PI * 38 ≈ 238.7
-      const C2 = 238.7;
-      const offset2 = (C2 * (1 - Math.min(1, Math.max(0, weeklyFraction)))).toFixed(1);
+      const isShortWarn = isShortLow || isShortFastBurn;
+      const isWeeklyWarn = isWeeklyLow || isWeeklyFastBurn;
 
-      // Colors
-      let outerColor = '#38bdf8'; // sky
-      if (ent.displayName.toLowerCase().includes('claude')) {
-        outerColor = '#10b981'; // emerald
+      // 实体与厂商标识
+      const isClaude = ent.displayName.toLowerCase().includes('claude') || ent.key.toLowerCase().includes('3p');
+      const providerName = isClaude ? 'Anthropic' : 'Google AI';
+
+      // 色彩映射 (方案 B)
+      let shortColor = '#29b6f6'; // Bright Sky
+      if (isClaude) {
+        shortColor = '#10b981'; // Emerald
       }
-      if (shortPct < 20) {
-        outerColor = '#f59e0b'; // amber
-      } else if (shortPct < 10) {
-        outerColor = '#f43f5e'; // rose
-      }
-
-      let innerColor = '#0284c7'; // dark sky
-      if (ent.displayName.toLowerCase().includes('claude')) {
-        innerColor = weeklyPct < 20 ? '#f59e0b' : '#a855f7';
-      } else if (weeklyPct < 20) {
-        innerColor = '#f59e0b';
+      if (shortPct < 10) {
+        shortColor = '#f43f5e'; // Rose
+      } else if (isShortWarn) {
+        shortColor = '#f59e0b'; // Amber
       }
 
-      // Border style for model box
-      const boxBorderClass = hasWarning ? 'border border-amber-500/40' : 'border border-slate-800/90';
-
-      // Provider label or warning tag
-      let tagHtml = `<span class="text-xs text-slate-400">${ent.displayName.toLowerCase().includes('claude') ? 'Anthropic' : 'Google AI'}</span>`;
-      if (hasWarning) {
-        tagHtml = `<span class="text-xs text-amber-400 font-semibold animate-pulse">● ${weeklyPct < 20 ? '周度预警' : '短期预警'}</span>`;
+      let weeklyColor = '#0284c7'; // Deep Sky
+      if (isClaude) {
+        weeklyColor = '#059669'; // Emerald or purple
+      }
+      if (weeklyPct < 10) {
+        weeklyColor = '#e11d48'; // Deep Rose
+      } else if (isWeeklyWarn) {
+        weeklyColor = '#d97706'; // Deep Amber
       }
 
-      // Badge style
-      const badgeBg = ent.displayName.toLowerCase().includes('claude') ? 'bg-amber-950 text-amber-400 border border-amber-800/60' : 'bg-sky-950 text-sky-400 border border-sky-800/60';
+      let badgeClass = 'badge-blue';
+      if (isClaude) {
+        badgeClass = isWarn ? 'badge-orange' : 'badge-emerald';
+      } else if (isWarn) {
+        badgeClass = 'badge-orange';
+      }
+
+      let tagHtml = `<span class="provider-tag">${escapeHtml(providerName)}</span>`;
+      if (isCritical) {
+        tagHtml = `<span class="warn-tag animate-pulse">● 配额极低告急</span>`;
+      } else if (isFastBurn) {
+        tagHtml = `<span class="warn-tag animate-pulse">● 消耗过快预警</span>`;
+      } else if (isLowQuota) {
+        tagHtml = `<span class="warn-tag animate-pulse">● 低配额预警</span>`;
+      }
+
+      // 方案 B：主容量环 + 内侧贴边「伴随细时间轨」
+      // 5h 组：外主环 r=86 (宽9) + 内贴边时间细环 r=77 (宽2.5)
+      // 7d 组：外主环 r=62 (宽9) + 内贴边时间细环 r=53 (宽2.5)
+      const svgHtml = `
+        <svg viewBox="0 0 200 200" width="100%" height="100%">
+          <!-- 5h 外层主容量粗环 (R=86, 宽9) -->
+          <circle cx="100" cy="100" r="86" fill="none" stroke="#182232" stroke-width="9"/>
+          <circle class="ring-arc" cx="100" cy="100" r="86" fill="none" stroke="${shortColor}" stroke-width="9"
+            stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(86, shortPct)}/>
+          <!-- 5h 伴随时间细环 (R=77, 宽2.5) -->
+          <circle cx="100" cy="100" r="77" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2.5"/>
+          <circle class="ring-arc" cx="100" cy="100" r="77" fill="none" stroke="rgba(241,245,249,0.55)" stroke-width="2.5"
+            stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(77, shortTimePct)}/>
+
+          <!-- 7d 内层主容量粗环 (R=62, 宽9) -->
+          <circle cx="100" cy="100" r="62" fill="none" stroke="#182232" stroke-width="9"/>
+          <circle class="ring-arc" cx="100" cy="100" r="62" fill="none" stroke="${weeklyColor}" stroke-width="9"
+            stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(62, weeklyPct)}/>
+          <!-- 7d 伴随时间细环 (R=53, 宽2.5) -->
+          <circle cx="100" cy="100" r="53" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2.5"/>
+          <circle class="ring-arc" cx="100" cy="100" r="53" fill="none" stroke="rgba(241,245,249,0.45)" stroke-width="2.5"
+            stroke-linecap="round" transform="rotate(-90 100 100)" ${arcAttrs(53, weeklyTimePct)}/>
+        </svg>
+      `;
 
       entityBoxesHtml += `
-        <div class="quota-unit-box ${boxBorderClass}">
-          <div class="w-full flex justify-between items-center">
-            <span class="px-2.5 py-1 text-xs font-bold ${badgeBg} rounded-md">${escapeHtml(ent.displayName.toUpperCase())}</span>
+        <div class="quota-unit-box ${isWarn ? 'warn' : ''}">
+          <div class="flex justify-between items-center w-full">
+            <span class="badge-tag ${badgeClass}">${escapeHtml(ent.displayName.toUpperCase())}</span>
             ${tagHtml}
           </div>
 
-          <!-- 巨型同心双环 SVG (自动适配至 180px~204px) -->
-          <div class="quota-ring-svg-wrap my-3">
-            <svg class="w-full h-full" viewBox="0 0 120 120">
-              <!-- 外环底轨与进度条 (5h 短期 R=52) -->
-              <circle cx="60" cy="60" r="52" fill="none" stroke="#152033" stroke-width="9"/>
-              <circle class="ring-circle" cx="60" cy="60" r="52" fill="none" stroke="${outerColor}" stroke-width="9" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="${offset1}"/>
-              <!-- 内环底轨与进度条 (7d 周度 R=38) -->
-              <circle cx="60" cy="60" r="38" fill="none" stroke="#152033" stroke-width="8"/>
-              <circle class="ring-circle" cx="60" cy="60" r="38" fill="none" stroke="${innerColor}" stroke-width="8" stroke-linecap="round" stroke-dasharray="238.7" stroke-dashoffset="${offset2}"/>
-            </svg>
-            <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
-              <span class="text-[11px] text-slate-400">5h 短期</span>
-              <span class="text-3xl font-extrabold ${shortPct < 20 ? 'text-amber-400' : 'text-white'} mono tracking-tight">${shortPct}%</span>
-              <span class="text-xs font-bold ${weeklyPct < 20 ? 'text-amber-300 bg-amber-950 border border-amber-600/50' : 'text-sky-400 bg-sky-950/60'} mono mt-1 px-2 py-0.5 rounded">7d: ${weeklyPct}%</span>
+          <!-- 方案 B：双维度侧环 SVG -->
+          <div class="quota-ring-svg-wrap">
+            ${svgHtml}
+            <div class="ring-center">
+              <div class="center-label">${escapeHtml(shortWinStr)} 短期</div>
+              <div class="center-val">${shortPct}%</div>
+              <div class="center-sub">${escapeHtml(weeklyWinStr)}: ${weeklyPct}%</div>
             </div>
           </div>
 
-          <!-- 环下方详情药丸框 -->
-          <div class="w-full space-y-2 text-xs border-t border-slate-800/80 pt-3">
-            <div class="flex justify-between items-center bg-slate-900/60 px-2.5 py-1.5 rounded-lg">
-              <span class="text-slate-300 flex items-center gap-1.5"><i class="w-2 h-2 rounded-full" style="background-color: ${outerColor};"></i>短期 (5h)</span>
-              <span class="${shortPct < 20 ? 'text-amber-400' : 'text-slate-300'} mono"><b>${shortPct}%</b> · ${formatDurationCompact(shortReset)}</span>
+          <div class="ring-divider"></div>
+
+          <!-- 双维度时间详情药丸 -->
+          <div class="quota-pills">
+            <div class="quota-pill ${isShortWarn ? 'pill-warn' : ''}">
+              <div class="pill-row">
+                <div class="pill-left"><span class="pill-dot" style="background:${shortColor}"></span>短期 (${escapeHtml(shortWinStr)})</div>
+                <div class="pill-right">${shortPct}% · ${shortTimeStr} <span class="muted">(余${shortTimePct}%)</span></div>
+              </div>
             </div>
-            <div class="flex justify-between items-center ${weeklyPct < 20 ? 'bg-amber-950/40 border border-amber-800/40' : 'bg-slate-900/60'} px-2.5 py-1.5 rounded-lg">
-              <span class="${weeklyPct < 20 ? 'text-amber-300' : 'text-slate-300'} flex items-center gap-1.5"><i class="w-2 h-2 rounded-full" style="background-color: ${innerColor};"></i>周度 (7d)</span>
-              <span class="${weeklyPct < 20 ? 'text-amber-400' : 'text-slate-300'} mono"><b>${weeklyPct}%</b> · ${formatDurationCompact(weeklyReset)}</span>
+            <div class="quota-pill ${isWeeklyWarn ? 'pill-warn' : ''}">
+              <div class="pill-row">
+                <div class="pill-left"><span class="pill-dot" style="background:${weeklyColor}"></span>周度 (${escapeHtml(weeklyWinStr)})</div>
+                <div class="pill-right">${weeklyPct}% · ${weeklyTimeStr} <span class="muted">(余${weeklyTimePct}%)</span></div>
+              </div>
             </div>
           </div>
         </div>
@@ -630,6 +745,7 @@ function renderSessions(sessions, forceRedraw = false) {
         sessions: [],
         totalInput: 0,
         totalOutput: 0,
+        totalCache: 0,
         nodes: new Set()
       });
     }
@@ -638,6 +754,7 @@ function renderSessions(sessions, forceRedraw = false) {
     if (s.tokens) {
       group.totalInput += s.tokens.total_input_tokens || 0;
       group.totalOutput += s.tokens.total_output_tokens || 0;
+      group.totalCache += s.tokens.total_cache_read_tokens || 0;
     }
     if (s.node_id) {
       group.nodes.add(s.node_id);
@@ -675,6 +792,7 @@ function renderSessions(sessions, forceRedraw = false) {
 
     const inTokens = formatTokens(sess.tokens ? sess.tokens.total_input_tokens : 0);
     const outTokens = formatTokens(sess.tokens ? sess.tokens.total_output_tokens : 0);
+    const cacheTokens = formatTokens(sess.tokens ? (sess.tokens.total_cache_read_tokens || 0) : 0);
     const rawMId = sess.model ? (sess.model.id || '') : '';
     const rawMDisp = sess.model ? (sess.model.display_name || '') : '';
     const matchedM = matchModelAlias(rawMId, rawMDisp);
@@ -715,7 +833,7 @@ function renderSessions(sessions, forceRedraw = false) {
           <span class="text-sky-400 mono">[${escapeHtml(modelName)}]</span>
         </div>
         <div class="flex justify-between items-center pt-2 text-[11px] mono text-slate-400 border-t border-slate-800/80">
-          <span>输入 <b class="text-emerald-400">↑ ${inTokens}</b> · 输出 <b class="text-rose-400">↓ ${outTokens}</b></span>
+          <span>↑ <b class="text-emerald-400">${inTokens}</b> · ↓ <b class="text-rose-400">${outTokens}</b> · ⚡ <b class="text-amber-300">${cacheTokens}</b></span>
           <span>上下文 <b class="text-white">${ctxPct}% [${ctxCap}]</b></span>
         </div>
         ${isExpanded ? `
@@ -750,7 +868,7 @@ function renderSessions(sessions, forceRedraw = false) {
                   ${escapeHtml(prefixPath)}<span class="text-white underline decoration-sky-500/60">${escapeHtml(lastPart)}</span>
                 </div>
                 <div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 mono">
-                  <span>1 个活跃会话</span> · <span>汇总: <b class="text-emerald-400">↑${formatTokens(group.totalInput)}</b> <b class="text-rose-400">↓${formatTokens(group.totalOutput)}</b></span>
+                  <span>1 个活跃会话</span> · <span>汇总: <b class="text-emerald-400">↑${formatTokens(group.totalInput)}</b> <b class="text-rose-400">↓${formatTokens(group.totalOutput)}</b> <b class="text-amber-300">⚡${formatTokens(group.totalCache)}</b></span>
                 </div>
               </div>
             </div>
@@ -792,7 +910,7 @@ function renderSessions(sessions, forceRedraw = false) {
           </div>
           <div class="flex items-center gap-5 text-xs mono text-slate-400 shrink-0">
             <span>涉及节点: <b class="text-slate-200">${group.nodes.size} 个</b></span>
-            <span>项目总吞吐: <b class="text-emerald-400">↑ ${formatTokens(group.totalInput)}</b> <b class="text-rose-400">↓ ${formatTokens(group.totalOutput)}</b></span>
+            <span>项目总吞吐: <b class="text-emerald-400">↑ ${formatTokens(group.totalInput)}</b> <b class="text-rose-400">↓ ${formatTokens(group.totalOutput)}</b> <b class="text-amber-300">⚡ ${formatTokens(group.totalCache)}</b></span>
             <span id="icon-${gId}" class="text-slate-400 text-xs">▼</span>
           </div>
         </div>
@@ -877,26 +995,166 @@ window.toggleSessionExpand = function(sessionId, event) {
   }
 };
 
-// 4. 渲染每日各模型 Token 表格
-function renderDailyTokensTable(rows, forceRedraw = false) {
-  const tbody = document.getElementById('daily-tokens-tbody');
-  if (!tbody) return;
+// 每日模型 Token 分析与堆叠图过滤状态
+let dailyFilterState = {
+  days: 14,
+  startDate: null,
+  endDate: null,
+  selectedModels: new Set(),
+  allModels: []
+};
+let rawDailyTokensData = [];
 
-  const cacheKey = JSON.stringify(rows || []);
-  if (!forceRedraw && lastRenderCache.daily === cacheKey) {
-    return;
+const MODEL_PALETTE = [
+  '#38bdf8', // Sky Blue (Gemini Flash)
+  '#10b981', // Emerald (Claude Sonnet)
+  '#a855f7', // Purple (GPT-OSS)
+  '#f59e0b', // Warm Amber (Argon)
+  '#6366f1', // Indigo (Hydrogen)
+  '#ec4899', // Pink
+  '#06b6d4', // Cyan
+  '#f97316', // Orange
+  '#14b8a6', // Teal
+  '#8b5cf6'  // Violet
+];
+
+const modelColorMap = new Map();
+function getModelColor(modelName, index = 0) {
+  const lower = (modelName || '').toLowerCase();
+  if (lower.includes('flash') || (lower.includes('gemini') && !lower.includes('argon') && !lower.includes('hydrogen'))) {
+    return '#38bdf8';
   }
-  lastRenderCache.daily = cacheKey;
-
-  const items = rows || [];
-  if (items.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500">近 14 天暂无模型 Token 消耗记录</td></tr>`;
-    return;
+  if (lower.includes('claude')) {
+    return '#10b981';
   }
+  if (lower.includes('argon')) {
+    return '#f59e0b';
+  }
+  if (lower.includes('hydrogen')) {
+    return '#6366f1';
+  }
+  if (lower.includes('gpt-oss') || lower.includes('oss')) {
+    return '#a855f7';
+  }
+  if (lower.includes('deepseek')) {
+    return '#06b6d4';
+  }
+  if (modelColorMap.has(modelName)) {
+    return modelColorMap.get(modelName);
+  }
+  const color = MODEL_PALETTE[index % MODEL_PALETTE.length];
+  modelColorMap.set(modelName, color);
+  return color;
+}
 
-  // 计算每日常模吞吐与聚合
-  const dateGroups = new Map();
+window.setTimeRange = function(days) {
+  dailyFilterState.days = Number(days);
+  dailyFilterState.startDate = null;
+  dailyFilterState.endDate = null;
+
+  const startInput = document.getElementById('date-filter-start');
+  const endInput = document.getElementById('date-filter-end');
+  if (startInput) startInput.value = '';
+  if (endInput) endInput.value = '';
+
+  document.querySelectorAll('#time-range-buttons .time-range-btn').forEach(btn => {
+    const d = Number(btn.getAttribute('data-days'));
+    btn.classList.toggle('active', d === Number(days));
+  });
+
+  renderDailyTokensView(rawDailyTokensData, true);
+};
+
+window.handleCustomDateChange = function() {
+  const startVal = document.getElementById('date-filter-start')?.value || '';
+  const endVal = document.getElementById('date-filter-end')?.value || '';
+  if (!startVal && !endVal) return;
+
+  dailyFilterState.startDate = startVal || null;
+  dailyFilterState.endDate = endVal || null;
+
+  document.querySelectorAll('#time-range-buttons .time-range-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+
+  renderDailyTokensView(rawDailyTokensData, true);
+};
+
+window.resetDateRangeFilter = function() {
+  window.setTimeRange(14);
+};
+
+window.toggleModelFilter = function(modelId) {
+  if (dailyFilterState.selectedModels.has(modelId)) {
+    dailyFilterState.selectedModels.delete(modelId);
+  } else {
+    dailyFilterState.selectedModels.add(modelId);
+  }
+  renderDailyTokensView(rawDailyTokensData, true);
+};
+
+window.selectAllModels = function(selectAll) {
+  if (selectAll) {
+    dailyFilterState.selectedModels = new Set(dailyFilterState.allModels);
+  } else {
+    dailyFilterState.selectedModels = new Set();
+  }
+  renderDailyTokensView(rawDailyTokensData, true);
+};
+
+// 4. 渲染每日各模型 Token 综合视图 (叠加柱状图 + 过滤器 + 明细表)
+function renderDailyTokensView(rows, forceRedraw = false) {
+  rawDailyTokensData = rows || [];
+  const items = rawDailyTokensData;
+
+  // 1. 发现所有在历史数据中出现的模型
+  const discoveredModels = new Set();
   for (const r of items) {
+    if (r.models && Array.isArray(r.models)) {
+      for (const m of r.models) {
+        if (m.model_id) discoveredModels.add(m.model_id);
+      }
+    }
+  }
+
+  const modelList = Array.from(discoveredModels);
+  dailyFilterState.allModels = modelList;
+
+  // 初次加载时，默认全选所有模型
+  if (dailyFilterState.selectedModels.size === 0 && modelList.length > 0) {
+    dailyFilterState.selectedModels = new Set(modelList);
+  }
+
+  // 2. 按时间范围筛选
+  let filteredItems = items;
+  if (dailyFilterState.startDate || dailyFilterState.endDate) {
+    filteredItems = items.filter(r => {
+      if (dailyFilterState.startDate && r.date < dailyFilterState.startDate) return false;
+      if (dailyFilterState.endDate && r.date > dailyFilterState.endDate) return false;
+      return true;
+    });
+  } else {
+    filteredItems = items.slice(0, dailyFilterState.days);
+  }
+
+  // 3. 计算时间范围内的各模型消耗总额 (用于展示在 Chips 标签上)
+  const modelTotals = new Map();
+  for (const r of filteredItems) {
+    if (r.models && Array.isArray(r.models)) {
+      for (const m of r.models) {
+        const cur = modelTotals.get(m.model_id) || 0;
+        modelTotals.set(m.model_id, cur + (m.total_tokens || 0));
+      }
+    }
+  }
+
+  // 4. 过滤并聚合每日数据
+  const dateGroups = new Map();
+  let rangeTotalTokens = 0;
+  let peakTokens = 0;
+  let peakDate = '--';
+
+  for (const r of filteredItems) {
     const d = r.date || '未知日期';
     if (!dateGroups.has(d)) {
       dateGroups.set(d, {
@@ -909,32 +1167,272 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
       });
     }
     const grp = dateGroups.get(d);
-    grp.totalIn += (r.total_input_tokens != null ? r.total_input_tokens : (r.input_tokens || 0));
-    grp.totalOut += (r.total_output_tokens != null ? r.total_output_tokens : (r.output_tokens || 0));
-    grp.totalCache += (r.total_cache_read_tokens != null ? r.total_cache_read_tokens : (r.cache_read_tokens || 0));
-    grp.totalTokens += (r.total_tokens || 0);
+    const dayModels = r.models || [];
 
-    if (r.models && Array.isArray(r.models)) {
-      for (const m of r.models) {
+    for (const m of dayModels) {
+      if (dailyFilterState.selectedModels.has(m.model_id)) {
         grp.models.push(m);
+        grp.totalIn += (m.input_tokens || 0);
+        grp.totalOut += (m.output_tokens || 0);
+        grp.totalCache += (m.cache_read_tokens || 0);
+        grp.totalTokens += (m.total_tokens || 0);
       }
-    } else {
-      grp.models.push(r);
     }
+
+    rangeTotalTokens += grp.totalTokens;
+    if (grp.totalTokens > peakTokens) {
+      peakTokens = grp.totalTokens;
+      peakDate = d;
+    }
+  }
+
+  // 5. 更新顶部指标卡片
+  const dayCount = dateGroups.size;
+  const avgTokens = dayCount > 0 ? Math.round(rangeTotalTokens / dayCount) : 0;
+  setText('range-total-tokens', formatTokens(rangeTotalTokens));
+  setText('range-avg-tokens', `${formatTokens(avgTokens)}/天`);
+  setText('range-peak-tokens', peakTokens > 0 ? `${formatTokens(peakTokens)} (${peakDate.slice(5)})` : '--');
+
+  // 6. 渲染模型筛选 Chips
+  renderModelFilterChips(modelList, modelTotals);
+
+  // 7. 渲染叠加柱状图
+  renderStackedBarChart(dateGroups);
+
+  // 8. 渲染每日明细表格
+  renderDailyTokensTable(dateGroups);
+}
+
+function renderModelFilterChips(allModels, modelTotals) {
+  const container = document.getElementById('model-filter-chips');
+  if (!container) return;
+
+  container.innerHTML = allModels.map(mId => {
+    const isSelected = dailyFilterState.selectedModels.has(mId);
+    const color = getModelColor(mId);
+    const alias = matchModelAlias(mId, mId);
+    const displayName = alias.matched && alias.name ? alias.name : mId;
+    const total = modelTotals.get(mId) || 0;
+
+    return `
+      <button type="button" onclick="toggleModelFilter('${escapeHtml(mId)}')"
+              class="model-chip ${isSelected ? 'active' : 'inactive'}"
+              title="点击切换此模型 (当前区间消耗: ${formatTokens(total)})">
+        <span class="w-2 h-2 rounded-full shrink-0" style="background:${color}"></span>
+        <span class="truncate max-w-[150px]">${escapeHtml(displayName)}</span>
+        <span class="mono text-[10px] opacity-75">${formatTokens(total)}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function renderStackedBarChart(dateGroups) {
+  const container = document.getElementById('stacked-bar-chart-container');
+  const legendContainer = document.getElementById('chart-legend-summary');
+  if (!container) return;
+
+  const days = Array.from(dateGroups.values()).reverse(); // 顺序按时间先后从左向右排列
+  if (days.length === 0) {
+    container.innerHTML = `<div class="flex items-center justify-center h-full text-slate-500 text-xs">当前筛选范围内无有效数据</div>`;
+    if (legendContainer) legendContainer.innerHTML = '';
+    return;
+  }
+
+  let maxDailyTokens = 0;
+  for (const d of days) {
+    if (d.totalTokens > maxDailyTokens) {
+      maxDailyTokens = d.totalTokens;
+    }
+  }
+  if (maxDailyTokens <= 0) maxDailyTokens = 100000;
+
+  const N = days.length;
+  const minSlot = 56;
+  const chartWidth = Math.max(720, N * minSlot + 90);
+  const chartHeight = 280;
+  const padLeft = 65;
+  const padRight = 30;
+  const padTop = 32;
+  const padBottom = 40;
+  const innerW = chartWidth - padLeft - padRight;
+  const innerH = chartHeight - padTop - padBottom;
+  const slotW = innerW / N;
+  const barW = Math.min(42, Math.max(14, slotW * 0.62));
+
+  let svgHtml = `<svg viewBox="0 0 ${chartWidth} ${chartHeight}" width="${chartWidth}" height="${chartHeight}" class="w-full h-full block select-none">`;
+
+  // 绘制 5 条水平网格标线与 Y 轴刻度
+  const ticks = [0, 0.25, 0.5, 0.75, 1.0];
+  for (const t of ticks) {
+    const yPos = padTop + innerH * (1 - t);
+    const val = maxDailyTokens * t;
+    svgHtml += `
+      <line x1="${padLeft}" y1="${yPos.toFixed(1)}" x2="${(chartWidth - padRight).toFixed(1)}" y2="${yPos.toFixed(1)}" stroke="#1e293b" stroke-dasharray="3 3"/>
+      <text x="${(padLeft - 8)}" y="${(yPos + 4).toFixed(1)}" text-anchor="end" class="mono text-[10px] fill-slate-500 font-normal">${formatTokens(val)}</text>
+    `;
+  }
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  // 绘制每根柱子与分层模型
+  days.forEach((day, idx) => {
+    const centerX = padLeft + idx * slotW + slotW / 2;
+    const barX = centerX - barW / 2;
+    const isToday = day.date === todayStr;
+    const dateLabel = day.date.slice(5);
+
+    // 当日整列半透明悬浮感应区
+    svgHtml += `
+      <rect x="${(padLeft + idx * slotW).toFixed(1)}" y="${padTop}" width="${slotW.toFixed(1)}" height="${innerH}"
+            fill="transparent" class="day-hover-band" data-date="${day.date}" data-daytotal="${day.totalTokens}"/>
+    `;
+
+    // 堆叠各模型分块 (自底向上累加)
+    let currentY = padTop + innerH;
+    const modelsToStack = [...day.models].filter(m => (m.total_tokens || 0) > 0);
+
+    modelsToStack.forEach((m, sIdx) => {
+      const segH = Math.max(2, ((m.total_tokens || 0) / maxDailyTokens) * innerH);
+      const segY = currentY - segH;
+      const color = getModelColor(m.model_id);
+      const isTop = (sIdx === modelsToStack.length - 1);
+      const rx = isTop ? '3' : '1';
+
+      const rawModel = m.model_id || '';
+      const alias = matchModelAlias(rawModel, m.display_name || rawModel);
+      const displayName = alias.matched && alias.name ? alias.name : (m.display_name || rawModel);
+
+      svgHtml += `
+        <rect x="${barX.toFixed(1)}" y="${segY.toFixed(1)}" width="${barW.toFixed(1)}" height="${segH.toFixed(1)}"
+              fill="${color}" rx="${rx}" class="stacked-bar-segment"
+              data-date="${day.date}"
+              data-model="${escapeHtml(displayName)}"
+              data-in="${m.input_tokens || 0}"
+              data-out="${m.output_tokens || 0}"
+              data-cache="${m.cache_read_tokens || 0}"
+              data-total="${m.total_tokens || 0}"
+              data-daytotal="${day.totalTokens}"
+              data-color="${color}"/>
+      `;
+      currentY = segY;
+    });
+
+    // 柱顶当日总量文字
+    if (day.totalTokens > 0) {
+      svgHtml += `
+        <text x="${centerX.toFixed(1)}" y="${(currentY - 6).toFixed(1)}" text-anchor="middle"
+              class="mono text-[10px] font-bold ${isToday ? 'fill-sky-400' : 'fill-slate-300'}">${formatTokens(day.totalTokens)}</text>
+      `;
+    }
+
+    // X 轴日期标注
+    svgHtml += `
+      <text x="${centerX.toFixed(1)}" y="${(padTop + innerH + 18).toFixed(1)}" text-anchor="middle"
+            class="mono text-xs ${isToday ? 'fill-sky-400 font-bold' : 'fill-slate-400'}">${dateLabel}${isToday ? ' (今)' : ''}</text>
+    `;
+  });
+
+  svgHtml += `</svg>`;
+  container.innerHTML = svgHtml;
+
+  // 渲染右上方动态图例
+  if (legendContainer) {
+    const activeModels = Array.from(dailyFilterState.selectedModels);
+    legendContainer.innerHTML = activeModels.map(mId => {
+      const color = getModelColor(mId);
+      const alias = matchModelAlias(mId, mId);
+      const name = alias.matched && alias.name ? alias.name : mId;
+      return `
+        <span class="flex items-center gap-1.5 text-slate-300">
+          <i class="w-2 h-2 rounded-full inline-block" style="background:${color}"></i>
+          <span>${escapeHtml(name)}</span>
+        </span>
+      `;
+    }).join('');
+  }
+
+  // 绑定交互悬浮 Tooltip
+  setupChartTooltip(container);
+}
+
+function setupChartTooltip(container) {
+  const tooltip = document.getElementById('chart-tooltip');
+  if (!tooltip || !container) return;
+
+  container.onmousemove = function(e) {
+    const target = e.target;
+    if (target && target.classList.contains('stacked-bar-segment')) {
+      const date = target.getAttribute('data-date');
+      const model = target.getAttribute('data-model');
+      const inTokens = Number(target.getAttribute('data-in') || 0);
+      const outTokens = Number(target.getAttribute('data-out') || 0);
+      const cacheTokens = Number(target.getAttribute('data-cache') || 0);
+      const totalTokens = Number(target.getAttribute('data-total') || 0);
+      const dayTotal = Number(target.getAttribute('data-daytotal') || 0);
+      const color = target.getAttribute('data-color') || '#38bdf8';
+
+      const pct = dayTotal > 0 ? ((totalTokens / dayTotal) * 100).toFixed(1) : '0.0';
+
+      tooltip.innerHTML = `
+        <div class="flex items-center justify-between border-b border-slate-700/80 pb-1.5 mb-2 gap-3">
+          <span class="font-bold text-white">📅 ${date}</span>
+          <span class="text-sky-400 mono font-bold">当日: ${formatTokens(dayTotal)}</span>
+        </div>
+        <div class="flex items-center gap-2 mb-2 font-semibold text-slate-200">
+          <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${color}"></span>
+          <span class="truncate max-w-[200px]">${escapeHtml(model)}</span>
+          <span class="text-xs text-sky-300 mono ml-auto font-bold">${pct}%</span>
+        </div>
+        <div class="space-y-1 text-[11px] mono text-slate-300 bg-slate-900/60 p-2 rounded-lg border border-slate-800">
+          <div class="flex justify-between items-center text-white"><span>模型总计:</span><b>${formatTokens(totalTokens)}</b></div>
+          <div class="flex justify-between items-center text-emerald-400"><span>输入 (↑):</span><span>${formatTokens(inTokens)}</span></div>
+          <div class="flex justify-between items-center text-rose-400"><span>输出 (↓):</span><span>${formatTokens(outTokens)}</span></div>
+          <div class="flex justify-between items-center text-amber-300"><span>缓存 (⚡):</span><span>${formatTokens(cacheTokens)}</span></div>
+        </div>
+      `;
+
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      tooltip.style.left = `${Math.min(rect.width - 240, Math.max(10, x - 110))}px`;
+      tooltip.style.top = `${Math.max(10, y - 135)}px`;
+      tooltip.classList.remove('hidden');
+    } else {
+      tooltip.classList.add('hidden');
+    }
+  };
+
+  container.onmouseleave = function() {
+    tooltip.classList.add('hidden');
+  };
+}
+
+function renderDailyTokensTable(dateGroups) {
+  const tbody = document.getElementById('daily-tokens-tbody');
+  const statsEl = document.getElementById('table-filter-stats');
+  if (!tbody) return;
+
+  const days = Array.from(dateGroups.values()); // 降序：最新日期在最前
+  if (days.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500">当前筛选范围内暂无模型 Token 消耗记录</td></tr>`;
+    if (statsEl) statsEl.textContent = '显示 0 天 · 0 条模型记录';
+    return;
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);
   let html = '';
+  let totalModelRows = 0;
 
-  for (const grp of dateGroups.values()) {
+  for (const grp of days) {
     const isToday = grp.date === todayStr;
     const dateLabel = isToday ? `📅 ${grp.date} (今日)` : `📅 ${grp.date}`;
 
-    // 汇总行
+    // 当日汇总行
     html += `
       <tr class="bg-sky-950/20 font-semibold text-slate-200">
         <td class="py-3 px-4 font-bold text-sky-400">${dateLabel}</td>
-        <td class="py-3 px-4 text-slate-300">当天各模型总计</td>
+        <td class="py-3 px-4 text-slate-300">当天所选模型总计</td>
         <td class="py-3 px-4 text-emerald-400">${formatTokens(grp.totalIn)}</td>
         <td class="py-3 px-4 text-rose-400">${formatTokens(grp.totalOut)}</td>
         <td class="py-3 px-4 text-amber-300">${formatTokens(grp.totalCache)}</td>
@@ -946,20 +1444,23 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
       </tr>
     `;
 
-    // 模型明细行
+    // 各模型明细行
     for (const m of grp.models) {
+      totalModelRows++;
       const rawModel = m.model_id || m.model || '';
       const alias = matchModelAlias(rawModel, m.display_name || rawModel);
       const modelDisplayName = alias.matched && alias.name ? `${alias.name}` : (m.display_name || rawModel || '默认模型');
       const isZero = (m.total_tokens || 0) === 0;
-      const pct = (m.percentage != null && m.percentage > 0)
-        ? m.percentage.toFixed(1)
+      const pct = (m.percentage != null && m.percentage > 0 && grp.totalTokens > 0)
+        ? ((m.total_tokens / grp.totalTokens) * 100).toFixed(1)
         : (grp.totalTokens > 0 ? ((m.total_tokens / grp.totalTokens) * 100).toFixed(1) : '0.0');
+      const color = getModelColor(rawModel);
 
       html += `
         <tr class="${isZero ? 'zero-row' : ''} hover:bg-slate-800/40 transition">
           <td class="py-2.5 px-4 text-slate-500">${grp.date}</td>
           <td class="py-2.5 px-4 text-slate-300 sub-row-cell">
+            <span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${color}"></span>
             ↳ <b>${escapeHtml(modelDisplayName)}</b>
           </td>
           <td class="py-2.5 px-4 text-slate-400">${formatTokens(m.input_tokens)}</td>
@@ -968,7 +1469,7 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
           <td class="py-2.5 px-4 font-bold text-slate-200">${formatTokens(m.total_tokens)}</td>
           <td class="py-2.5 px-4">
             <div class="text-[11px] text-slate-400 mb-0.5">${pct}%</div>
-            <div class="bar-bg"><div class="bar-fill" style="width: ${pct}%;"></div></div>
+            <div class="bar-bg"><div class="bar-fill" style="width: ${pct}%; background-color: ${color};"></div></div>
           </td>
         </tr>
       `;
@@ -976,6 +1477,7 @@ function renderDailyTokensTable(rows, forceRedraw = false) {
   }
 
   tbody.innerHTML = html;
+  if (statsEl) statsEl.textContent = `显示 ${days.length} 天 · ${totalModelRows} 条模型记录`;
   toggleZeroRows();
 }
 
@@ -1737,7 +2239,7 @@ window.handleReleaseFilesSelected = async function(files) {
 async function refreshDashboard(forceRedraw = false) {
   try {
     const overviewPromise = fetch(getApiUrl('api/v1/overview'));
-    const tokensDailyPromise = fetch(getApiUrl('api/v1/tokens/daily?days=14'));
+    const tokensDailyPromise = fetch(getApiUrl('api/v1/tokens/daily?days=90'));
     const quotasPromise = fetch(getApiUrl('api/v1/quotas'));
     const sessionsPromise = fetch(getApiUrl('api/v1/sessions'));
 
@@ -1800,7 +2302,7 @@ async function refreshDashboard(forceRedraw = false) {
     // 渲染各模块
     renderAccountQuotas(quotas, forceRedraw);
     renderSessions(sessions, forceRedraw);
-    renderDailyTokensTable(dailyTokens, forceRedraw);
+    renderDailyTokensView(dailyTokens, forceRedraw);
 
     if (activeMainTab === 'tab-debug') {
       loadDebugRawReports();
