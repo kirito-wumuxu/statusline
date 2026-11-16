@@ -120,6 +120,11 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// DB returns the underlying sql.DB instance for internal scanner and batch queries.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 func (s *Store) Ingest(env *model.TelemetryEnvelope) error {
 	if env == nil {
 		return nil
