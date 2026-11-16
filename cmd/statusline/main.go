@@ -15,6 +15,7 @@ import (
 	"statusline/internal/node"
 	"statusline/internal/render"
 	"statusline/internal/reporter"
+	"statusline/internal/transcript"
 	"statusline/internal/updater"
 	"statusline/internal/vcs"
 )
@@ -95,6 +96,17 @@ func execute(r io.Reader, w io.Writer, cfg *config.Config, n node.NodeInfo) {
 	}
 	line := render.AssembleLine(data, homeDir, segments, priorities)
 	_, _ = io.WriteString(w, line)
+
+	// Probe real API tokens from transcript tail if path is available
+	if env != nil && env.Normalized.TranscriptPath != "" {
+		usage := transcript.ProbeRecentUsage(env.Normalized.TranscriptPath, env.Normalized.SessionID, 5*time.Millisecond)
+		if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.CacheReadTokens > 0 || usage.CacheCreationTokens > 0 {
+			env.Normalized.CurrentInputTokens = usage.InputTokens
+			env.Normalized.CurrentOutputTokens = usage.OutputTokens
+			env.Normalized.CacheReadTokens = usage.CacheReadTokens
+			env.Normalized.CacheCreationTokens = usage.CacheCreationTokens
+		}
+	}
 
 	// CRIT-1: Terminal output is already written. Synchronously report with strict timeout
 	// so Go runtime doesn't terminate before HTTP packets leave the machine.
