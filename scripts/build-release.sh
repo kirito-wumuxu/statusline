@@ -67,6 +67,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   echo "Compiling ${GOOS}/${GOARCH} with version ${VERSION}..."
   CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -ldflags="${LDFLAGS}" -o "${STAGE_DIR}/statusline${EXT}" "${ROOT_DIR}/cmd/statusline"
   CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -ldflags="${LDFLAGS}" -o "${STAGE_DIR}/statusline-server${EXT}" "${ROOT_DIR}/cmd/statusline-server"
+  CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -ldflags="${LDFLAGS}" -o "${STAGE_DIR}/statusline-session${EXT}" "${ROOT_DIR}/cmd/statusline-session"
   [ -f "${ROOT_DIR}/client.yaml" ] && cp "${ROOT_DIR}/client.yaml" "${STAGE_DIR}/"
   [ -f "${ROOT_DIR}/server.yaml" ] && cp "${ROOT_DIR}/server.yaml" "${STAGE_DIR}/"
   if [ -f "${ROOT_DIR}/AGENTS.md" ]; then

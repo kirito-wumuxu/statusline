@@ -1,9 +1,10 @@
 # AGENTS.md - statusline & statusline-server
 
 ## 1. 项目目标与定位
-`statusline` 是专为 AI 命令行助手（Google Antigravity `agy` 与 Anthropic Claude Code）打造的高性能跨平台终端状态栏插件与集中遥测监控系统。
+`statusline` 是专为 AI 命令行助手（Google Antigravity `agy` 与 Anthropic Claude Code）打造的高性能跨平台终端状态栏插件、集中遥测监控系统与独立 TUI 会话管理器。
 - **`statusline`（客户端插件）**：标准输入读取 CLI 推送的实时会话 JSON，<2ms 内向终端渲染 ANSI 状态行至 `stdout`，并异步非阻塞上报标准信封至服务端。
 - **`statusline-server`（服务端与 Web 仪表盘）**：纯 Go 零 CGO 独立常驻服务，基于嵌入式 SQLite3（WAL 高并发模式）实现 4 表事务化持久存储，并内嵌深色实时 Web 监控仪表盘。
+- **`statusline-session`（独立 TUI 会话管理器，别名 `sls`）**：独立现代化双栏 TUI 终端会话管理器（基于 Bubble Tea + Lip Gloss），严格按本机设备 ID 过滤会话，提供模糊搜索、转录历史对话预览与一键切目录接管恢复（支持 Tmux 独立窗口拉起与剪贴板复制）。
 
 ---
 
@@ -41,14 +42,28 @@
 │   ├── statusline/                 # 客户端入口 (stdin -> render -> async report)
 │   │   ├── main.go
 │   │   └── main_test.go
-│   └── statusline-server/          # 服务端入口 (HTTP 监听、自动 Migrate)
+│   ├── statusline-server/          # 服务端入口 (HTTP 监听、自动 Migrate)
+│   │   ├── main.go
+│   │   ├── main_test.go
+│   │   └── web/                    # 嵌入式深色 Web 仪表盘 (//go:embed)
+│   │       ├── index.html
+│   │       ├── app.js
+│   │       └── style.css
+│   └── statusline-session/         # 独立 TUI 会话管理器入口 (别名 sls)
 │       ├── main.go
 │       ├── main_test.go
-│       └── web/                    # 嵌入式深色 Web 仪表盘 (//go:embed)
-│           ├── index.html
-│           ├── app.js
-│           └── style.css
+│       ├── app.go                  # Bubble Tea 响应式状态机
+│       ├── app_test.go
+│       └── ui/                     # Lip Gloss 深色排版与双栏组件
+│           ├── styles.go
+│           ├── list_pane.go
+│           ├── detail_pane.go
+│           └── preview_pane.go
 ├── internal/
+│   ├── session/                    # 会话服务、本设备 Node ID 过滤引擎与 Launcher 恢复执行器
+│   │   ├── service.go
+│   │   ├── preview.go
+│   │   └── launcher.go
 │   ├── config/                     # 配置加载 (YAML + 环境变量覆盖)
 │   ├── logging/                    # 结构化日志 (log/slog，固定写入可执行文件同目录，nopHandler零开销)
 │   ├── autoupdate/                 # 客户端每日首次调用自动后台静默同步与升级 (防抖状态戳、Detached 子进程)
@@ -112,12 +127,14 @@
 ### 编译本地二进制 (支持 Windows / Linux 跨平台零 CGO 静态编译)
 ```bash
 # Linux amd64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline ./cmd/statusline
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline-server ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.6'" -o bin/statusline ./cmd/statusline
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.6'" -o bin/statusline-server ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.6'" -o bin/statusline-session ./cmd/statusline-session
 
 # Windows amd64
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline.exe ./cmd/statusline
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.0'" -o bin/statusline-server.exe ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.6'" -o bin/statusline.exe ./cmd/statusline
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.6'" -o bin/statusline-server.exe ./cmd/statusline-server
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X 'main.Version=v0.2.6'" -o bin/statusline-session.exe ./cmd/statusline-session
 ```
 
 ### 构建全平台发布包与自动上传 (Release Assets)
@@ -171,6 +188,19 @@ go test ./... -v
   statusline auto-update -force    # 强制执行（即使今日已执行过）
   ```
   AI CLI (`agy` / `claude`) 每天首次唤起 `statusline` 渲染状态行后，自动在后台静默拉起独立 Detached 进程：从服务端同步别名与优先级并写入 `client.yaml`，若检测到官方发布新版本则自动执行原地原子升级（零终端延迟、零 stdout 污染、并发状态戳防抖）。可通过 `client.yaml` 中的 `auto_sync:` 块灵活开启或关闭。
+- **独立 TUI 会话管理器与快速恢复 (`statusline-session` / `sls`)**:
+  ```bash
+  statusline-session               # 启动交互式 TUI 会话管理器（默认严格展示当前设备活跃会话）
+  statusline-session -a            # 查看跨设备全量会话（包含异地机器记录）
+  statusline-session -db <path>    # 指定自定义 SQLite 数据库路径
+  ```
+  在双栏 TUI 界面中：
+  - `↑/↓` 或 `k/j`：浏览会话列表，右侧即时联动显示元数据卡片与最后 2 轮问答（Prompt 与 Model 回复摘要）语法高亮预览；
+  - `/`：激活即时模糊搜索框，支持按项目名、分支、工具名或会话 ID 快速筛选；
+  - `Enter`：退出 TUI，在当前终端自动 `cd <CWD>` 并唤起对应 AI CLI（`claude --resume` 或 `agy`）原生接管；
+  - `t`：在当前 Tmux 独立新窗口中打开并恢复该会话；
+  - `c`：将完整的 `cd <CWD> && <command>` 恢复指令复制到系统剪贴板；
+  - `a`：在「仅本机设备会话」与「全部跨设备会话」之间快速切换。
 - **自定义环境变量**:
   - `export STATUSLINE_SERVER_URL="http://127.0.0.1:8628/api/v1/report"`（修改上报地址）
   - `export STATUSLINE_SERVER_URL="off"`（停用遥测上报，纯本地离线渲染）

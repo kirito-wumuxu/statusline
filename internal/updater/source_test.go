@@ -71,6 +71,8 @@ func TestServerSourceSuccess(t *testing.T) {
 }
 
 func TestResolveSourceFallbackToGitHubWhenServerUnavailable(t *testing.T) {
+	t.Setenv("STATUSLINE_RELEASES_DIR", "off") // disable local dir scan to test github fallback
+
 	cfg := &config.Config{
 		Report: config.ReportConfig{Endpoint: "http://127.0.0.1:54321/api/v1/report"}, // offline server
 	}

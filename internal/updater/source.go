@@ -108,6 +108,9 @@ func ResolveSource(cfg *config.Config, forcedSource string) (Source, error) {
 func getLocalReleasesCandidates() []string {
 	var candidates []string
 	if envDir := os.Getenv("STATUSLINE_RELEASES_DIR"); envDir != "" {
+		if envDir == "off" || envDir == "none" {
+			return nil
+		}
 		candidates = append(candidates, envDir)
 	}
 	if serverCfg, err := config.LoadServerConfig(""); err == nil && serverCfg != nil && serverCfg.Storage.ReleasesDir != "" {
