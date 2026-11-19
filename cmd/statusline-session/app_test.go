@@ -138,3 +138,47 @@ func TestAppModel_EnterLaunches(t *testing.T) {
 		t.Errorf("expected tea.Quit command on launch")
 	}
 }
+
+func TestAppModel_View(t *testing.T) {
+	items := []session.SessionItem{
+		{
+			Record:      storage.SessionRecord{SessionID: "sess_view", ProductType: "claude_code", CWD: "/tmp"},
+			DisplayName: "repo-view",
+			IsLocalNode: true,
+			HasValidCWD: true,
+		},
+	}
+
+	mockSvc := &mockSessionService{items: items}
+	app := NewAppModel(mockSvc, true)
+	app.termWidth = 100
+	app.termHeight = 30
+	app.loadSessions()
+
+	// 1. Inactive search View
+	viewInactive := app.View()
+	if viewInactive == "" {
+		t.Errorf("expected non-empty view when search is inactive")
+	}
+
+	// 2. Active search View (empty query, placeholder active)
+	slashMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}}
+	m, _ := app.Update(slashMsg)
+	app = m.(*AppModel)
+
+	if !app.searchActive {
+		t.Fatalf("expected searchActive to be true after '/'")
+	}
+	viewActive := app.View()
+	if viewActive == "" {
+		t.Errorf("expected non-empty view when search is active")
+	}
+
+	// 3. Small terminal View
+	app.termWidth = 10
+	app.termHeight = 5
+	viewSmall := app.View()
+	if viewSmall == "" {
+		t.Errorf("expected small terminal warning message")
+	}
+}

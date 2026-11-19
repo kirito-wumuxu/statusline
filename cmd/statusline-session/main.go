@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"statusline/internal/config"
+	"statusline/internal/logging"
 	"statusline/internal/session"
 	"statusline/internal/storage"
 
@@ -30,6 +31,7 @@ Usage:
 
 Options:
   -all-nodes, -a     Show sessions from all devices (default: local device only)
+  -source <mode>     Session data source: auto (default), remote (API only), db (SQLite only)
   -db <path>         Custom path to statusline SQLite database
   -config <path>     Custom path to client.yaml or server.yaml
   -version, -v       Print version information
@@ -46,6 +48,7 @@ Keybindings in TUI:
 func main() {
 	allNodesFlag := flag.Bool("all-nodes", false, "Show sessions from all nodes")
 	flag.BoolVar(allNodesFlag, "a", false, "Alias for -all-nodes")
+	sourceFlag := flag.String("source", "auto", "Data source: auto (prefer remote API with local fallback), remote (API only), db (SQLite only)")
 	dbPathFlag := flag.String("db", "", "Path to SQLite database")
 	configPathFlag := flag.String("config", "", "Path to client.yaml or server.yaml")
 	versionFlag := flag.Bool("version", false, "Print version")
@@ -70,28 +73,40 @@ func main() {
 		cfg = config.DefaultClientConfig()
 	}
 
-	// 2. Open SQLite database if present
-	var store *storage.Store
-	dbPath := *dbPathFlag
-	if dbPath == "" {
-		homeDir, _ := os.UserHomeDir()
-		if homeDir != "" {
-			dbPath = filepath.Join(homeDir, ".local", "share", "statusline", "statusline.db")
-		}
+	// 2. Initialize logging (default: nopHandler prevents terminal stderr pollution)
+	cleanup := logging.Setup(cfg.Logging.Enabled, cfg.Logging.Level, cfg.Logging.Format, "statusline-session.log")
+	defer cleanup()
+
+	// If user explicitly passed a custom -db path, set source to db unless overridden
+	if *dbPathFlag != "" && *sourceFlag == "auto" {
+		*sourceFlag = "db"
 	}
-	if dbPath != "" {
-		if fi, err := os.Stat(dbPath); err == nil && !fi.IsDir() {
-			if s, err := storage.NewStore(dbPath); err == nil {
-				defer s.Close()
-				store = s
+
+	// 3. Open SQLite database if not in pure remote mode
+	var store *storage.Store
+	if *sourceFlag != "remote" {
+		dbPath := *dbPathFlag
+		if dbPath == "" {
+			homeDir, _ := os.UserHomeDir()
+			if homeDir != "" {
+				dbPath = filepath.Join(homeDir, ".local", "share", "statusline", "statusline.db")
+			}
+		}
+		if dbPath != "" {
+			if fi, err := os.Stat(dbPath); err == nil && !fi.IsDir() {
+				if s, err := storage.NewStore(dbPath); err == nil {
+					defer s.Close()
+					store = s
+				}
 			}
 		}
 	}
 
-	// 3. Initialize session service
+	// 4. Initialize session service
 	svc := session.NewSessionService(store, cfg)
+	svc.SetSourceMode(session.SourceMode(*sourceFlag))
 
-	// 4. Run Bubble Tea TUI
+	// 5. Run Bubble Tea TUI
 	initialOnlyLocal := !*allNodesFlag
 	app := NewAppModel(svc, initialOnlyLocal)
 

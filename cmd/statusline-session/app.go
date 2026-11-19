@@ -39,10 +39,11 @@ type AppModel struct {
 // NewAppModel initializes the TUI application model.
 func NewAppModel(service session.SessionService, initialOnlyLocal bool) *AppModel {
 	ti := textinput.New()
-	ti.Placeholder = "输入关键词搜索 (项目名、分支、工具、ID)..."
+	ti.Placeholder = "输入关键词过滤 (Esc 退出)..."
 	ti.Prompt = "🔍 过滤: "
 	ti.CharLimit = 64
-	ti.Width = 50
+	// 注意：保持 ti.Width 为 0（自适应）。
+	// bubbles/textinput 在 Width > 0 时对含中文字符的 Placeholder 计算视觉列宽后切片 rune 会发生 bounds out of range panic。
 
 	m := &AppModel{
 		service:       service,
@@ -107,8 +108,9 @@ func (m *AppModel) updatePreview() {
 		return
 	}
 	item := m.filteredItems[m.cursor]
-	if item.Record.TranscriptPath != "" {
-		prompt, reply, _ := session.LoadTranscriptPreview(item.Record.TranscriptPath)
+	tPath := session.ResolveTranscriptPath(item.Record.ProductType, item.Record.SessionID, item.Record.TranscriptPath)
+	if tPath != "" {
+		prompt, reply, _ := session.LoadTranscriptPreview(tPath)
 		m.previewPrompt = prompt
 		m.previewReply = reply
 	} else {
@@ -234,9 +236,11 @@ func (m *AppModel) View() string {
 	header := lipgloss.JoinHorizontal(lipgloss.Center, titleStr, " ", nodeScopeStr)
 
 	// 2. Search bar
-	searchView := m.searchInput.View()
-	if !m.searchActive && m.searchInput.Value() == "" {
-		searchView = lipgloss.NewStyle().Foreground(ui.ColorMuted).Render("按 [/] 键开启过滤搜索...")
+	var searchView string
+	if m.searchActive || m.searchInput.Value() != "" {
+		searchView = m.searchInput.View()
+	} else {
+		searchView = lipgloss.NewStyle().Foreground(ui.ColorMuted).Render("🔍 按 [/] 键开启过滤搜索 (项目名、分支、工具、ID)...")
 	}
 	searchBar := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, true, false).

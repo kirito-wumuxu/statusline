@@ -2,11 +2,15 @@ package session
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"statusline/internal/config"
 	"statusline/internal/storage"
 )
 
@@ -112,5 +116,95 @@ func TestFormatRelativeTime(t *testing.T) {
 		if got != c.expected {
 			t.Errorf("for diff %v: expected %q, got %q", c.diff, c.expected, got)
 		}
+	}
+}
+
+func TestSessionService_RemoteFetch(t *testing.T) {
+	localNodeID := "node_client_test"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/sessions" {
+			http.NotFound(w, r)
+			return
+		}
+		nodeQuery := r.URL.Query().Get("node_id")
+		list := []remoteSessionDTO{
+			{
+				SessionID:   "sess_remote_1",
+				NodeID:      localNodeID,
+				ProductType: "claude_code",
+				CWD:         "/tmp",
+				Timestamp:   time.Now().Unix(),
+			},
+			{
+				SessionID:   "sess_remote_2",
+				NodeID:      "other_node",
+				ProductType: "antigravity",
+				CWD:         "/tmp",
+				Timestamp:   time.Now().Unix(),
+			},
+		}
+
+		var filtered []remoteSessionDTO
+		for _, item := range list {
+			if nodeQuery != "" && item.NodeID != nodeQuery {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(filtered)
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		Report: config.ReportConfig{
+			Endpoint: ts.URL + "/api/v1/report",
+		},
+		Node: config.NodeConfig{
+			ID: localNodeID,
+		},
+	}
+
+	svc := NewSessionService(nil, cfg)
+	svc.SetSourceMode(SourceRemote)
+
+	// 1. Fetch onlyLocalNode = true
+	items, err := svc.ListSessions(context.Background(), true)
+	if err != nil {
+		t.Fatalf("remote ListSessions failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 local session from remote, got %d", len(items))
+	}
+	if items[0].Record.SessionID != "sess_remote_1" {
+		t.Errorf("expected sess_remote_1, got %s", items[0].Record.SessionID)
+	}
+
+	// 2. Fetch all nodes = false
+	allItems, err := svc.ListSessions(context.Background(), false)
+	if err != nil {
+		t.Fatalf("remote ListSessions(all) failed: %v", err)
+	}
+	if len(allItems) != 2 {
+		t.Fatalf("expected 2 sessions from remote, got %d", len(allItems))
+	}
+}
+
+func TestResolveTranscriptPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.jsonl")
+	_ = os.WriteFile(testFile, []byte("{}"), 0644)
+
+	// Existing path
+	resolved := ResolveTranscriptPath("antigravity", "some-id", testFile)
+	if resolved != testFile {
+		t.Errorf("expected %s, got %s", testFile, resolved)
+	}
+
+	// Empty input
+	if ResolveTranscriptPath("", "", "") != "" {
+		t.Errorf("expected empty string for empty inputs")
 	}
 }

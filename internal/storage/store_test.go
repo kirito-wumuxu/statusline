@@ -604,9 +604,10 @@ func TestDailyModelTokensAtomicAggregation(t *testing.T) {
 	}
 	defer s.Close()
 
+	nowStr := time.Now().UTC().Format(time.RFC3339)
 	sessID := "atomic-sess-1"
 	e1 := &model.TelemetryEnvelope{
-		ReportedAt: "2026-11-16T10:00:00Z",
+		ReportedAt: nowStr,
 		Payload:    map[string]interface{}{},
 		Normalized: model.NormalizedData{
 			ProductType:         "antigravity",
@@ -619,7 +620,7 @@ func TestDailyModelTokensAtomicAggregation(t *testing.T) {
 		},
 	}
 	e2 := &model.TelemetryEnvelope{
-		ReportedAt: "2026-11-16T10:05:00Z",
+		ReportedAt: nowStr,
 		Payload:    map[string]interface{}{},
 		Normalized: model.NormalizedData{
 			ProductType:         "antigravity",

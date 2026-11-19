@@ -5,8 +5,43 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
+
+// ResolveTranscriptPath checks if a transcript file exists, or resolves it from local standard paths.
+func ResolveTranscriptPath(productType, sessionID, currentPath string) string {
+	if currentPath != "" {
+		if fi, err := os.Stat(currentPath); err == nil && !fi.IsDir() {
+			return currentPath
+		}
+	}
+	if sessionID == "" {
+		return ""
+	}
+	homeDir, _ := os.UserHomeDir()
+	if homeDir == "" {
+		return ""
+	}
+
+	prod := strings.ToLower(productType)
+	if strings.Contains(prod, "antigravity") || strings.Contains(prod, "agy") {
+		p := filepath.Join(homeDir, ".gemini", "antigravity-cli", "brain", sessionID, ".system_generated", "logs", "transcript.jsonl")
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+		matches, _ := filepath.Glob(filepath.Join(homeDir, ".gemini", "antigravity*", "brain", sessionID, ".system_generated", "logs", "transcript.jsonl"))
+		if len(matches) > 0 {
+			return matches[0]
+		}
+	} else if strings.Contains(prod, "claude") {
+		matches, _ := filepath.Glob(filepath.Join(homeDir, ".claude", "projects", "*", sessionID+".jsonl"))
+		if len(matches) > 0 {
+			return matches[0]
+		}
+	}
+	return ""
+}
 
 // LoadTranscriptPreview scans the tail of a transcript file and extracts the latest
 // User Prompt and Model Assistant completion.

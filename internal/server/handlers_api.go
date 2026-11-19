@@ -39,6 +39,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 		Timestamp         int64                `json:"timestamp"`
 		CWD               string               `json:"cwd"`
 		ProjectDir        string               `json:"project_dir,omitempty"`
+		TranscriptPath    string               `json:"transcript_path,omitempty"`
 		GitBranch         string               `json:"git_branch,omitempty"`
 		Model             model.ModelSummary   `json:"model"`
 		Account           model.AccountSummary `json:"account"`
@@ -73,6 +74,7 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 			Timestamp:         ts,
 			CWD:               sess.CWD,
 			ProjectDir:        sess.ProjectDir,
+			TranscriptPath:    sess.TranscriptPath,
 			GitBranch:         sess.GitBranch,
 			Model: model.ModelSummary{
 				ID:          sess.LatestModelID,
