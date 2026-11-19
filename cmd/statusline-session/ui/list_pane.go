@@ -20,10 +20,10 @@ func RenderSessionList(items []session.SessionItem, cursor int, width, height in
 		if active {
 			borderStyle = StylePaneBorderFocused
 		}
-		return borderStyle.Width(width).Height(height).Render(emptyMsg)
+		return borderStyle.Width(width).Height(height).MaxHeight(height).Render(emptyMsg)
 	}
 
-	contentHeight := height - 2
+	contentHeight := height - 3 // 1 line for header, 2 lines for border
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -98,7 +98,9 @@ func RenderSessionList(items []session.SessionItem, cursor int, width, height in
 
 		line := fmt.Sprintf("%s%s %s%s %s%s", cursorMark, badge, name, branchStr, timeTag, nodeTag)
 		if isSelected {
-			line = lipgloss.NewStyle().Background(lipgloss.Color("#1e293b")).Width(width - 4).Render(line)
+			line = lipgloss.NewStyle().Background(lipgloss.Color("#1e293b")).Width(width - 4).MaxHeight(1).Render(line)
+		} else {
+			line = lipgloss.NewStyle().Width(width - 4).MaxHeight(1).Render(line)
 		}
 		lines = append(lines, line)
 	}
@@ -110,5 +112,5 @@ func RenderSessionList(items []session.SessionItem, cursor int, width, height in
 	}
 
 	header := fmt.Sprintf(" 会话列表 (%d/%d) ", cursor+1, len(items))
-	return borderStyle.Width(width).Height(height).Render(header + "\n" + content)
+	return borderStyle.Width(width).Height(height).MaxHeight(height).Render(header + "\n" + content)
 }

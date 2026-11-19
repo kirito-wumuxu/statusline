@@ -120,11 +120,32 @@ func main() {
 	// 5. Handle post-TUI launch action
 	if m, ok := finalModel.(*AppModel); ok && m.launchAction != nil {
 		targetItem := *m.launchAction
-		cmdName, cmdArgs, cwd, _ := session.BuildResumeCommand(targetItem)
+		cmdName, cmdArgs, cwd, fullCmd := session.BuildResumeCommand(targetItem)
 
 		if !session.CheckWorkingDir(cwd) {
 			fmt.Fprintf(os.Stderr, "❌ 无法启动：工作目录 %q 在本机不存在或已被移除。\n", cwd)
 			os.Exit(1)
+		}
+
+		if m.launchMode == "tmux" {
+			sessionName := targetItem.DisplayName
+			if sessionName == "" {
+				sessionName = targetItem.Record.ProductType
+			}
+			tmuxBin, tmuxArgs, err := session.BuildTmuxAttachCommand(fullCmd, sessionName, cwd)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ Tmux 启动失败: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("🚀 正在通过 Tmux 启动/接管会话 [%s] (目录: %s)...\n", sessionName, cwd)
+			c := exec.Command(tmuxBin, tmuxArgs...)
+			c.Stdin = os.Stdin
+			c.Stdout = os.Stdout
+			c.Stderr = os.Stderr
+			if err := c.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Tmux 会话结束: %v\n", err)
+			}
+			return
 		}
 
 		fmt.Printf("🚀 正在切入目录 %s 并恢复会话...\n", cwd)

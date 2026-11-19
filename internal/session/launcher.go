@@ -55,7 +55,7 @@ func CheckWorkingDir(cwd string) bool {
 // LaunchInTmux creates a new window in the active tmux session to run the command.
 func LaunchInTmux(fullCmd, windowName, cwd string) error {
 	if os.Getenv("TMUX") == "" {
-		return fmt.Errorf("当前不在 tmux 环境中，无法在新窗口打开")
+		return fmt.Errorf("当前终端未运行在 tmux 会话中")
 	}
 
 	tmuxBin, err := exec.LookPath("tmux")
@@ -63,17 +63,70 @@ func LaunchInTmux(fullCmd, windowName, cwd string) error {
 		return fmt.Errorf("系统中未找到 tmux 可执行文件: %w", err)
 	}
 
+	safeName := SanitizeTmuxName(windowName)
 	args := []string{"new-window"}
 	if cwd != "" {
 		args = append(args, "-c", cwd)
 	}
-	if windowName != "" {
-		args = append(args, "-n", windowName)
+	if safeName != "" {
+		args = append(args, "-n", safeName)
 	}
 	args = append(args, fullCmd)
 
 	cmd := exec.Command(tmuxBin, args...)
 	return cmd.Run()
+}
+
+// BuildTmuxAttachCommand builds the command and arguments to launch/attach tmux when outside tmux.
+func BuildTmuxAttachCommand(fullCmd, sessionName, cwd string) (tmuxBin string, args []string, err error) {
+	tmuxBin, err = exec.LookPath("tmux")
+	if err != nil {
+		return "", nil, fmt.Errorf("系统中未找到 tmux，请先安装 tmux (例如 sudo apt install tmux)")
+	}
+
+	safeName := SanitizeTmuxName(sessionName)
+	if safeName == "" {
+		safeName = "statusline"
+	}
+
+	// Check if session already exists
+	checkCmd := exec.Command(tmuxBin, "has-session", "-t", safeName)
+	if err := checkCmd.Run(); err == nil {
+		// Session exists: create a new window in it, then attach
+		newWinArgs := []string{"new-window", "-t", safeName}
+		if cwd != "" {
+			newWinArgs = append(newWinArgs, "-c", cwd)
+		}
+		newWinArgs = append(newWinArgs, fullCmd)
+		_ = exec.Command(tmuxBin, newWinArgs...).Run()
+
+		return tmuxBin, []string{"attach-session", "-t", safeName}, nil
+	}
+
+	// Session does not exist: create new session with this command
+	args = []string{"new-session", "-s", safeName}
+	if cwd != "" {
+		args = append(args, "-c", cwd)
+	}
+	args = append(args, fullCmd)
+	return tmuxBin, args, nil
+}
+
+// SanitizeTmuxName removes invalid characters (. and :) for tmux session/window names.
+func SanitizeTmuxName(name string) string {
+	var sb strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			sb.WriteRune(r)
+		} else if r == ' ' || r == '.' || r == ':' || r == '/' {
+			sb.WriteRune('-')
+		}
+	}
+	res := strings.Trim(sb.String(), "-")
+	if res == "" {
+		res = "session"
+	}
+	return res
 }
 
 // CopyToClipboard attempts to copy text using OSC 52 sequence and native platform fallbacks.

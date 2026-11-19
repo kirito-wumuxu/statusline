@@ -65,3 +65,23 @@ func TestCheckWorkingDir(t *testing.T) {
 		t.Errorf("expected empty dir to be invalid")
 	}
 }
+
+func TestSanitizeTmuxName(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"my-project", "my-project"},
+		{"repo:feature.v1", "repo-feature-v1"},
+		{"project / test", "project---test"},
+		{"...", "session"},
+		{"", "session"},
+	}
+
+	for _, c := range cases {
+		got := SanitizeTmuxName(c.input)
+		if got != c.expected {
+			t.Errorf("SanitizeTmuxName(%q): expected %q, got %q", c.input, c.expected, got)
+		}
+	}
+}

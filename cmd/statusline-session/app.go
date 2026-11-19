@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"statusline/cmd/statusline-session/ui"
@@ -197,13 +199,28 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t":
 			if len(m.filteredItems) > 0 && m.cursor < len(m.filteredItems) {
 				item := m.filteredItems[m.cursor]
-				_, _, _, fullCmd := session.BuildResumeCommand(item)
-				name := item.DisplayName
-				if err := session.LaunchInTmux(fullCmd, name, item.Record.CWD); err == nil {
-					m.statusMessage = "✓ 已在 Tmux 新窗口打开该会话！"
-				} else {
-					m.statusMessage = "✗ Tmux 拉起失败: " + err.Error()
+				// 1. Check if tmux binary is installed
+				if _, err := exec.LookPath("tmux"); err != nil {
+					m.statusMessage = "✗ 未安装 tmux: 请先安装 tmux (如 sudo apt install tmux)"
+					return m, nil
 				}
+
+				// 2. If already inside tmux, open a new window in the active session
+				if os.Getenv("TMUX") != "" {
+					_, _, cwd, fullCmd := session.BuildResumeCommand(item)
+					name := item.DisplayName
+					if err := session.LaunchInTmux(fullCmd, name, cwd); err == nil {
+						m.statusMessage = "✓ 已在当前 Tmux 新窗口打开该会话！"
+					} else {
+						m.statusMessage = "✗ Tmux 新窗口拉起失败: " + err.Error()
+					}
+					return m, nil
+				}
+
+				// 3. If outside tmux, exit TUI and launch/attach into Tmux
+				m.launchAction = &item
+				m.launchMode = "tmux"
+				return m, tea.Quit
 			}
 			return m, nil
 
@@ -250,9 +267,9 @@ func (m *AppModel) View() string {
 		Render(searchView)
 
 	// 3. Main layout: Left Pane (List) + Right Pane (Details & Preview)
-	mainHeight := height - 6
-	if mainHeight < 6 {
-		mainHeight = 6
+	mainHeight := height - 5
+	if mainHeight < 8 {
+		mainHeight = 8
 	}
 
 	leftWidth := (width * 38) / 100
@@ -266,17 +283,19 @@ func (m *AppModel) View() string {
 
 	leftPane := ui.RenderSessionList(m.filteredItems, m.cursor, leftWidth, mainHeight, !m.searchActive)
 
-	// Right pane
+	// Right pane: detail (top, 10 lines) + preview (bottom, remaining lines)
+	detailHeight := 10
+	if mainHeight < 16 {
+		detailHeight = mainHeight / 2
+	}
+	previewHeight := mainHeight - detailHeight
+
 	var currentItem *session.SessionItem
 	if len(m.filteredItems) > 0 && m.cursor >= 0 && m.cursor < len(m.filteredItems) {
 		currentItem = &m.filteredItems[m.cursor]
 	}
 
-	detailPane := ui.RenderDetailPane(currentItem, rightWidth)
-	previewHeight := mainHeight - 12
-	if previewHeight < 4 {
-		previewHeight = 4
-	}
+	detailPane := ui.RenderDetailPane(currentItem, rightWidth, detailHeight)
 	previewPane := ui.RenderPreviewPane(m.previewPrompt, m.previewReply, rightWidth, previewHeight)
 
 	rightCol := lipgloss.JoinVertical(lipgloss.Left, detailPane, previewPane)
@@ -288,6 +307,7 @@ func (m *AppModel) View() string {
 		statusStyled := lipgloss.NewStyle().Foreground(ui.ColorAmber).Bold(true).Render(m.statusMessage)
 		helpBar = statusStyled + " | " + helpBar
 	}
+	helpBar = lipgloss.NewStyle().Width(width - 2).MaxHeight(1).Render(helpBar)
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, searchBar, mainContent, helpBar)
 }

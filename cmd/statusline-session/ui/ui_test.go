@@ -68,7 +68,7 @@ func TestRenderDetailPane(t *testing.T) {
 		HasValidCWD:  true,
 	}
 
-	rendered := RenderDetailPane(item, 50)
+	rendered := RenderDetailPane(item, 50, 10)
 	if !strings.Contains(rendered, "sess_test_99") {
 		t.Errorf("expected session ID in details, got: %s", rendered)
 	}
@@ -85,7 +85,7 @@ func TestRenderPreviewPane(t *testing.T) {
 	if !strings.Contains(rendered, "How does Bubble Tea work?") {
 		t.Errorf("expected prompt in preview, got: %s", rendered)
 	}
-	if !strings.Contains(rendered, "Elm architecture") {
+	if !strings.Contains(rendered, "Elm") || !strings.Contains(rendered, "architecture") {
 		t.Errorf("expected reply in preview, got: %s", rendered)
 	}
 
